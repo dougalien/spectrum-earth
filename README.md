@@ -4,14 +4,26 @@ Ideal-shape analysis of topographic profiles by Dougalien Systems.
 
 The idea comes from grain shape: Wadell fitted a sand grain with a perfect sphere and measured the material left over, and how far a grain departs from the sphere records how it has been worn. Spectrum Earth does the same for landforms. Any profile, whether it crosses a valley, runs over a hill or mountain, or follows a river down its long profile, is fitted with perfect shapes. The app then measures how far the profile departs from them.
 
-- **Half profiles.** The profile is split at its apex (summit, valley floor or head), and each half is pinned at the apex and its own foot, so asymmetry is kept rather than averaged away. A valley is measured as an upside-down hill, and a long profile is one half on its own.
-- **Perfect shapes**, from sagging to full: strongly concave, concave parabola, straight-sided (cone / V), parabola, the circle in true proportions (Wadell's sphere), semicircle and box.
-- **Departure** is the extra plus the missing rock between the profile and the nearest perfect shape, as a share of the feature's width times its height. **Irregularity** is what is left after a smooth curve is fitted to each half. In grain work these are sphericity and roundness.
-- **Shape Chart.** Profiles are organised by form across (fullness) and by departure up, like Powers' roundness chart. Add your own profiles one at a time, or press *Add all samples*.
+Every profile goes through the same fixed procedure:
 
-The departure grades are provisional. They were set from the sample profiles, not from a calibrated population.
+1. **Locate** the apex (summit, valley floor or head of a long profile) and the foot of each side.
+2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height and pinned at the apex and its own foot, so a lopsided feature, or a valley with one rim far lower than the other, keeps its shape. A valley is measured as an upside-down hill, and a long profile is one half on its own. A flat top or floor is measured, not fitted: the ideal is flat out to its edge and the curve is fitted to the wall beyond.
+3. **Fit three ideal curves to each half**, each with one free control, so they compete on equal terms:
+   - **Parabola** `g = (1 - u)(1 - k u)`: every true parabola, from the concave one with its vertex at the foot (k = 1) through the straight line (k = 0) to the dome or U with its vertex at the apex (k = -1).
+   - **Circle in true proportions**: a real circular arc through apex and foot, drawn without vertical exaggeration (Wadell's sphere). Its control is the bulge of the arc.
+   - **Superellipse** `g = (1 - u^e)^(1/e)`: shapes more sagging or fuller than any parabola, such as the strongly concave cone (e about 0.5), the semicircle (e = 2) and the box.
 
-The fitting engine is `ideal_shape.py`. It has no Streamlit dependency and is ported from Spectrum Jax's validated volcano engine. `tests/` checks that it recovers every perfect shape. The earlier analyses (peaks, FFT, landform screening, the power-law shape register) are still available under **Other analyses**.
+   The best member of each family is the one that leaves the least rock out of place, found by a fine grid and a bounded refinement.
+4. **Choose** the family with the smallest total departure. On a near tie (within 0.1% of the box) the order above wins, parabola first.
+5. **Measure.** **Departure** is the extra plus the missing rock between the profile and that ideal, as a share of the feature's width times its height. A fixed straight cone or V is kept alongside for scale.
+
+**The name** comes from the fitted ideal's fullness (the share of its box it fills): strongly concave, concave parabola, gently concave, straight, gently convex, parabola, semicircle, box. A profile is called straight only when its best parabola has |k| under 0.25.
+
+**Shape Chart.** Profiles are organised by form across (fullness) and by departure up, like Powers' roundness chart. Add your own profiles one at a time, or press *Add all samples*.
+
+The departure grades (near-ideal under 1%, slightly modified under 2.5%, modified under 5%, strongly modified above) are provisional. They were set from the sample profiles, not from a calibrated population.
+
+The fitting engine is `ideal_shape.py`. It has no Streamlit dependency and is ported from Spectrum Jax's validated volcano engine. `tests/` checks that each family recovers its own shapes (and that a curved profile is never left with a straight fit). The earlier analyses (peaks, FFT, landform screening, the power-law shape register) are still available under **Other analyses**.
 
 XRD, GC and SEM/EDS analysis now lives in TraceCode.
 

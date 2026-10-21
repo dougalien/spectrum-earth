@@ -45,19 +45,24 @@ DISTANCE_UNITS = {"metres": 1.0, "kilometres": 1000.0, "feet": 0.3048, "miles": 
 ELEVATION_UNITS = {"metres": 1.0, "feet": 0.3048, "kilometres": 1000.0}
 
 CHART_Y = {
-    "Departure from the nearest perfect shape": "Departure",
-    "Irregularity (left after a smooth fit)": "Irregularity",
-    "Departure from the circle (true proportions)": "Departure from Circle (true proportions)",
+    "Departure from the best-fitting ideal": "Departure",
+    "Departure from a straight cone or V": "Departure from straight",
 }
 
 SHAPE_ORDER = list(ideal.PERFECT_SHAPES)
-CHOICE_KEYS = SHAPE_ORDER + [ideal.BEST_FIT]
+CHOICE_KEYS = list(ideal.FAMILIES) + [ideal.STRAIGHT]
 
 
 def choice_label(key: str) -> str:
-    if key == ideal.BEST_FIT:
-        return ideal.BEST_FIT_NAME
-    return ideal.PERFECT_SHAPES[key]["name"]
+    if key == ideal.STRAIGHT:
+        return "Straight cone or V (fixed)"
+    return f"Best-fitting {ideal.FAMILIES[key]['name'].lower()}"
+
+
+def choice_note(key: str) -> str:
+    if key == ideal.STRAIGHT:
+        return "A fixed straight line from apex to foot on each half: the perfect cone or V."
+    return ideal.FAMILIES[key]["note"]
 
 
 def _layout(fig, title: str, height: int, **kw):
@@ -83,8 +88,8 @@ def _real_halves(item: dict, key: str) -> tuple[np.ndarray, np.ndarray, np.ndarr
     xs, zr, zi = [], [], []
     for h in item["halves"]:
         x = m["x_apex"] + h["sign"] * ideal.U * h["radius"]
-        z_real = m["base_elev"] + h["g"] * m["height"]
-        z_ideal = m["base_elev"] + ideal_g[h["side"]] * m["height"]
+        z_real = h["base"] + h["g"] * h["height"]
+        z_ideal = h["base"] + ideal_g[h["side"]] * h["height"]
         if kind == ideal.VALLEY:
             z_real, z_ideal = -z_real, -z_ideal
         if h["sign"] < 0:
@@ -184,12 +189,14 @@ def half_figure(item: dict, key: str):
 
 
 def fingerprint_figure(item: dict, key: str):
-    """Departure from every perfect shape, in ladder order. The shortest bar is the nearest."""
+    """How well each ideal family fits at its best, and the fixed straight line for scale."""
     names, vals, colours = [], [], []
-    for k in SHAPE_ORDER:
-        names.append(ideal.PERFECT_SHAPES[k]["name"])
+    for k in CHOICE_KEYS:
+        if k not in item["comparisons"]:
+            continue
+        names.append(choice_label(k).replace("Best-fitting ", "Best ").replace(" (fixed)", ""))
         vals.append(100.0 * item["comparisons"][k]["departure"])
-        colours.append(HIGHLIGHT if k == item["nearest"] else BAR_MUTED)
+        colours.append(HIGHLIGHT if k == item["family"] else BAR_MUTED)
     fig = go.Figure(go.Bar(
         x=vals, y=names, orientation="h", marker=dict(color=colours, line=dict(width=0)),
         text=[f"{v:.1f}%" for v in vals], textposition="outside",
@@ -197,23 +204,22 @@ def fingerprint_figure(item: dict, key: str):
         hovertemplate="<b>%{y}</b><br>departure %{x:.2f}% of height<extra></extra>",
         showlegend=False,
     ))
-    _layout(fig, "Departure from each perfect shape", 380, bargap=0.35)
+    _layout(fig, "How well each ideal fits", 320, bargap=0.35)
     fig.update_layout(margin=dict(l=20, r=60, t=60, b=20))
-    fig.update_xaxes(title="departure, % of height (0 = this profile IS that shape)",
+    fig.update_xaxes(title="departure, % of the box (0 = this profile IS that ideal)",
                      range=[0, max(vals) * 1.25 + 0.5])
     fig.update_yaxes(autorange="reversed")
     return fig
 
 
-def perfect_shapes_figure(kind: str, aspect: float = 0.2):
-    """The ladder of perfect shapes, drawn the way up this feature is."""
+def perfect_shapes_figure(kind: str):
+    """The landmark shapes along the form axis, drawn the way up this feature is."""
     keys = SHAPE_ORDER
     fig = make_subplots(rows=1, cols=len(keys), horizontal_spacing=0.02,
-                        subplot_titles=[ideal.PERFECT_SHAPES[k]["name"].replace(" (true proportions)", "<br>(true proportions)")
-                                        for k in keys])
+                        subplot_titles=[ideal.PERFECT_SHAPES[k]["name"] for k in keys])
     u = np.concatenate([-ideal.U[::-1], ideal.U[1:]])
     for i, k in enumerate(keys, start=1):
-        g = ideal.perfect_curve(k, aspect)
+        g = ideal.PERFECT_SHAPES[k]["g"](ideal.U)
         g2 = np.concatenate([g[::-1], g[1:]])
         if kind == ideal.SLOPE:
             xx, yy = ideal.U, g
@@ -241,7 +247,7 @@ def shape_chart_figure(rows: list, current: dict | None, y_col: str):
     lo = 0.0
     shades = ["rgba(27,175,122,0.07)", "rgba(237,161,0,0.06)", "rgba(235,104,52,0.06)",
               "rgba(208,59,59,0.06)"]
-    if y_col != "Irregularity":
+    if y_col == "Departure":
         for (limit, label), shade in zip(ideal.DEPARTURE_CLASSES, shades):
             hi = min(limit * 100.0, y_top)
             if lo >= y_top:
@@ -253,12 +259,8 @@ def shape_chart_figure(rows: list, current: dict | None, y_col: str):
 
     # The perfect shapes sit on the floor of the chart: departure 0 by definition.
     for k in SHAPE_ORDER:
-        if k == "circle":
-            continue
-        f = ideal.fullness(ideal.perfect_curve(k))
+        f = ideal.fullness(ideal.PERFECT_SHAPES[k]["g"](ideal.U))
         name = ideal.PERFECT_SHAPES[k]["name"]
-        if k == "parabola":
-            name = "Parabola ≈ circle<br>(low relief)"
         fig.add_vline(x=f, line=dict(color=FAINT, width=1, dash="dot"), layer="below")
         fig.add_trace(go.Scatter(
             x=[f], y=[0.0], mode="markers+text", text=[name], textposition="bottom center",
@@ -290,7 +292,7 @@ def shape_chart_figure(rows: list, current: dict | None, y_col: str):
             name=legend_name, legendgroup=legend_name, showlegend=legend_name not in seen,
             customdata=[[r.get("Label", ""), r.get("Shape", ""), r.get("Grade", "")]],
             hovertemplate=("<b>#%{text} %{customdata[0]}</b><br>%{customdata[1]}<br>"
-                           "fullness %{x:.3f}<br>" + y_col.lower() + " %{y:.2f}% of height"
+                           "fullness %{x:.3f}<br>" + y_col.lower() + " %{y:.2f}% of the box"
                            "<br>%{customdata[2]}<extra></extra>"),
         ))
         seen.add(legend_name)
@@ -304,15 +306,14 @@ def shape_chart_figure(rows: list, current: dict | None, y_col: str):
                            "fullness %{x:.3f}<br>%{y:.2f}% of height<extra></extra>"),
         ))
 
-    ylab = {"Departure": "departure from the nearest perfect shape",
-            "Irregularity": "irregularity left after a smooth fit"}.get(y_col, "departure from the true circle")
+    ylab = {"Departure": "departure from the best-fitting ideal"}.get(y_col, "departure from a straight cone or V")
     _layout(fig, "Shape chart", 560)
     fig.update_layout(margin=dict(l=20, r=20, t=60, b=40),
                       legend=dict(orientation="h", yanchor="bottom", y=-0.22, xanchor="left", x=0))
     fig.update_xaxes(title="fullness: share of its box the half profile fills (sagging → full)",
                      range=[0.0, 1.0])
     # Room under the floor for the perfect shapes' names, clear of the points.
-    fig.update_yaxes(title=f"{ylab}, % of height", range=[-0.16 * y_top, y_top],
+    fig.update_yaxes(title=f"{ylab}, % of the box", range=[-0.16 * y_top, y_top],
                      tickvals=[v for v in np.arange(0.0, y_top + 1e-9, 2.0 if y_top <= 20 else 5.0)])
     return fig
 
@@ -337,12 +338,13 @@ def to_display_units(item: dict, sx: float, sz: float) -> dict:
     out["x"] = item["x"] / sx
     out["z"] = item["z"] / sz
     m = dict(item["m"])
-    for k in ("x_left", "x_right", "x_apex", "width"):
+    for k in ("x_left", "x_right", "x_apex", "width", "x_flat_left", "x_flat_right"):
         m[k] = m[k] / sx
-    for k in ("base_elev", "apex_elev", "height"):
+    for k in ("base_elev", "apex_elev", "height", "base_left", "base_right"):
         m[k] = m[k] / sz
     out["m"] = m
-    out["halves"] = [dict(h, radius=h["radius"] / sx) for h in item["halves"]]
+    out["halves"] = [dict(h, radius=h["radius"] / sx, base=h["base"] / sz, height=h["height"] / sz)
+                     for h in item["halves"]]
     return out
 
 
@@ -355,40 +357,42 @@ def default_feature(dataset_type: str, volcano_type: str, long_type: str) -> str
 
 
 def render_explainer():
-    with st.expander("How the ideal-shape fit works", expanded=False):
+    with st.expander("How the fit works - the fixed procedure", expanded=False):
         st.markdown(
             """
 **The idea comes from grain shape.** Wadell fitted a sand grain with a perfect sphere and measured
 the material left over; how far a grain departs from the sphere, and where, records how it has
-been worn. Here the grain is a landform and the sphere is a ladder of perfect shapes.
+been worn. Here the grain is a landform and the sphere is the best-fitting ideal curve.
 
-**Half profiles.** The profile is split at its apex (the summit of a hill, the floor of a valley,
-the head of a long profile). Each half is stretched onto its own width and the feature's height,
-so a lopsided feature keeps its asymmetry instead of having it averaged away. Every perfect shape
-is pinned to the same apex and the same foot, with no free parameters, the way the sphere is
-pinned to the grain.
+Every profile goes through the same five steps:
 
-**The perfect shapes**, from sagging to full: strongly concave, the concave parabola (the
-stratovolcano flank and the graded river), straight-sided (the cone and the V), the parabola, the
-circle in true proportions (Wadell's sphere: a real circle, drawn without vertical exaggeration),
-the semicircle (scaled to the box, a semi-ellipse in real units) and the box.
+1. **Locate.** Find the apex (the summit of a hill, the floor of a valley, the head of a long
+   profile) and the foot of each side (the base of a hill, each rim of a valley, the mouth).
+2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height,
+   so a lopsided feature, or a valley with one rim far higher than the other, keeps its shape.
+3. **Fit three ideal curves to each half.** Each is pinned to the apex and the foot and has one
+   free control, so they compete on equal terms:
+   - **Parabola** (control *k*): every true parabola from the concave one with its vertex at the
+     foot (*k* = 1) through the straight line (*k* = 0) to the dome or U with its vertex at the
+     apex (*k* = -1).
+   - **Circle in true proportions** (control: bulge): a real circular arc, drawn without
+     vertical exaggeration - Wadell's sphere.
+   - **Superellipse** (control *e*): (1 - u^e)^(1/e), for shapes fuller or more sagging than any
+     parabola - the strongly concave cone (e about 0.5), the semicircle (e = 2), the box.
 
-**Two numbers come out**, and they are the sphericity and roundness of grain work:
+   The best member of each family is the one that leaves the least rock out of place.
+4. **Choose.** The family that leaves the least rock out of place is the ideal. On a near tie
+   (within 0.1% of the box) the order above wins, parabola first.
+5. **Measure.** Extra rock (blue) and missing rock (red) between the profile and that ideal, as a
+   share of the feature's box (width times height). **Departure** is the two added together.
+   The sign is about rock on a hill and in a valley alike.
 
-- **Departure** is the extra plus the missing rock between the profile and the nearest perfect
-  shape, as a share of the feature's box (width times height). It says how far the gross form
-  has moved from the ideal.
-- **Irregularity** is what is left after a smooth curve is fitted to each half. It says how
-  ragged the outline is, whatever its overall form.
+**The name** comes from the fitted ideal's fullness - the share of its box it fills: 1/6 strongly
+concave, 1/3 concave parabola, 5/12 gently concave, 1/2 straight, 7/12 gently convex, 2/3
+parabola, 0.79 semicircle, 0.93 box - with a flat top or floor added when one is measured. A
+profile is called straight only when its best parabola has |k| under 0.25.
 
-**Rock, not area.** Blue is rock the perfect shape does not have; red is rock it has that the
-landform lacks. The sign means the same on a hill and in a valley.
-
-**Fullness** is the share of its box a half profile fills: 1/6 for the strongly concave shape,
-1/2 for a cone or V, 2/3 for the parabola, about 0.93 for the box. It is the across axis of the
-shape chart, so shapes are organised by form across and by departure up.
-
-The departure grades (near-ideal under 2%, slightly modified under 4%, modified under 8%,
+The departure grades (near-ideal under 1%, slightly modified under 2.5%, modified under 5%,
 strongly modified above) are provisional: they were set from the sample profiles that ship with
 the app, not from a calibrated population.
             """
@@ -403,30 +407,28 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str):
 
     kind = item["kind"]
     words = ideal.VOCAB[kind]
-    nearest = item["nearest"]
+    fam = item["family"]
     st.markdown(f"### {item['name'][0].upper() + item['name'][1:]}")
     st.caption(
-        f"Nearest perfect shape: **{ideal.PERFECT_SHAPES[nearest]['name']}**, departure "
-        f"{_pct(item['departure'])} of the height, **{item['grade']}**."
+        f"Best-fitting ideal: **{ideal.fit_words(item)}**. Departure {_pct(item['departure'])} "
+        f"of the box, **{item['grade']}**."
     )
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Departure", _pct(item["departure"]),
-              help="Extra plus missing rock between the profile and the nearest perfect shape, as "
-                   "a share of the feature's width times its height. 0 means the profile IS that shape.")
-    c2.metric("Irregularity", _pct(item["irregularity"]),
-              help="What is left after a smooth curve is fitted to each half: how ragged the "
-                   "outline is, apart from its overall form.")
-    c3.metric("Net rock", _pct(item["comparisons"][nearest]["net"], signed=True),
-              help="Extra minus missing rock against the nearest perfect shape. Positive means "
-                   "more rock than the perfect shape has.")
-    c4.metric("Fullness", f"{item['fullness']:.3f}",
-              help="Share of its box the half profile fills: 0.5 for a cone or V, 0.667 for a parabola.")
+              help="Extra plus missing rock between the profile and the best-fitting ideal, as a "
+                   "share of the feature's width times its height. 0 means the profile IS that ideal.")
+    c2.metric("Net rock", _pct(item["comparisons"][fam]["net"], signed=True),
+              help="Extra minus missing rock against the best-fitting ideal. Positive means more "
+                   "rock than the ideal has.")
+    c3.metric("Fullness", f"{item['fullness']:.3f}",
+              help="Share of its box the profile fills: 0.5 for a cone or V, 0.667 for a parabola.")
+    c4.metric("Departure from straight", _pct(item["comparisons"][ideal.STRAIGHT]["departure"]),
+              help="Against a fixed straight cone or V, for scale: how curved the profile is.")
 
     pick = st.selectbox(
-        "Compare with", CHOICE_KEYS, index=CHOICE_KEYS.index(nearest), format_func=choice_label,
+        "Compare with", CHOICE_KEYS, index=CHOICE_KEYS.index(fam), format_func=choice_label,
         key="ideal_compare_with",
-        help="Defaults to the nearest perfect shape. Pick another to see where this profile has "
-             "more or less rock than that shape.",
+        help="Defaults to the best-fitting ideal. Pick another to see how it fits.",
     )
     comp = item["comparisons"][pick]
     st.plotly_chart(overlay_figure(item, pick, x_label, y_label), width="stretch")
@@ -436,13 +438,7 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str):
     z3.metric("Departure", _pct(comp["departure"]))
     z4.metric("Net", _pct(comp["net"], signed=True))
     st.markdown(ideal.zone_words(comp))
-    if pick != ideal.BEST_FIT:
-        st.caption(ideal.PERFECT_SHAPES[pick]["note"])
-    else:
-        st.caption(
-            "The smooth curve is not a perfect shape: it bends freely to follow each half, so what "
-            "it leaves behind is small-scale irregularity only."
-        )
+    st.caption(choice_note(pick))
 
     left, right = st.columns([1.35, 1.0], gap="large")
     with left:
@@ -451,12 +447,15 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str):
         st.plotly_chart(fingerprint_figure(item, pick), width="stretch")
         rows = []
         side_name = {"L": "left", "R": "right", "D": "downslope"}
+        spec = ideal.FAMILIES[fam]
         for h in item["halves"]:
             d = item["by_side"][h["side"]]
+            v = item["comparisons"][fam]["params"][h["side"]]
             rows.append({
                 "Half": side_name[h["side"]],
-                "Width": f"{h['radius']:,.4g}" if h["radius"] < 1000 else f"{h['radius']:,.0f}",
-                "Nearest": ideal.PERFECT_SHAPES[d["nearest"]]["name"],
+                "Width": _num(h["radius"]),
+                "Height": _num(h["height"]),
+                f"{spec['name'].split(' ')[0]} {spec['param']}": f"{v:+.2f}" if fam != "superellipse" else f"{v:.2f}",
                 "Departure": _pct(d["departure"]),
                 "Fullness": f"{d['fullness']:.3f}",
             })
@@ -465,21 +464,24 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str):
         facts = [f"{words['feature'].capitalize()} {m['width_height']:.1f} times as wide as it is high."]
         if kind != ideal.SLOPE:
             facts.append(f"Asymmetry {m['asymmetry']:.3f} (0 = both halves hold the same area).")
-            if ideal.has_flat_apex(item):
+            if item.get("flat"):
                 facts.append(f"A {words['flat']} across {m['plateau']:.0%} of the width.")
         st.caption(" ".join(facts))
 
     for n in item.get("notes", []):
         st.info(n)
 
-    st.markdown("**The perfect shapes**")
-    aspect = np.nanmedian(list(item["aspect"].values())) if item.get("aspect") else 0.2
-    st.plotly_chart(perfect_shapes_figure(kind, aspect), width="stretch")
+    st.markdown("**Landmark shapes along the form axis**")
+    st.plotly_chart(perfect_shapes_figure(kind), width="stretch")
     st.caption(
-        "Drawn the way up this feature is, each scaled to the same box. The circle is drawn at this "
-        "profile's own proportions, because a true circle changes shape with the aspect."
+        "Drawn the way up this feature is, each scaled to the same box. They name the fitted ideal "
+        "by its fullness and sit on the floor of the shape chart."
     )
     render_explainer()
+
+
+def _num(v: float) -> str:
+    return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:,.4g}"
 
 
 def _add_rows(new_rows: list):
@@ -510,9 +512,10 @@ def measure_samples(sample_files: dict, sample_kind, samples_dir: Path) -> list:
 def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_kind,
                        samples_dir: Path):
     st.markdown(
-        "Profiles organised by their departure from the ideal: across, which perfect shape they are "
-        "closest to (by fullness); up, how far they have moved from it. The perfect shapes sit on "
-        "the floor of the chart. This is Powers' roundness chart turned on landforms."
+        "Profiles organised by their departure from the ideal: across, how full the form is, from "
+        "sagging to box-like; up, how much rock is out of place against the best-fitting ideal. The "
+        "landmark shapes sit on the floor of the chart. This is Powers' roundness chart turned on "
+        "landforms."
     )
     current = ideal.summary_row(item, "profile loaded now") if item.get("ok") else None
     rows = st.session_state.get("ideal_chart_rows") or []
@@ -551,11 +554,10 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
 
     if rows:
         df = pd.DataFrame(rows)
-        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Nearest perfect shape", "Departure",
-                     "Grade", "Irregularity", "Net rock", "Fullness"]
+        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Best-fitting ideal", "Departure",
+                     "Grade", "Net rock", "Fullness"]
         show = df[[c for c in show_cols if c in df.columns]].copy()
-        for c in ("Departure", "Irregularity"):
-            show[c] = show[c].map(lambda v: _pct(v))
+        show["Departure"] = show["Departure"].map(lambda v: _pct(v))
         show["Net rock"] = show["Net rock"].map(lambda v: _pct(v, signed=True))
         show["Fullness"] = show["Fullness"].map(lambda v: f"{v:.3f}")
         st.dataframe(show, width="stretch", hide_index=True)

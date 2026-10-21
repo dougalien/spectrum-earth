@@ -49,7 +49,7 @@ this module touches Streamlit, so it can be tested on its own.
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize_scalar
 from scipy.signal import find_peaks, savgol_filter
 
 HILL = "hill"
@@ -71,6 +71,9 @@ PROCESSING = {
     # The flat top (or floor) is the ground within this fraction of the height
     # of the apex, as a fraction of the width.
     "plateau_level": 0.05,
+    # The apex is the middle of the ground within this finer fraction of the
+    # relief of the top (inside the coarser summit run).
+    "apex_level": 0.01,
     # Two-pass measurement: the second pass crops to the feature plus this
     # fraction of its width on each side and smooths again at that scale, so
     # the answer does not depend on how much surrounding ground the file holds.
@@ -173,7 +176,13 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     band = z_top - PROCESSING["plateau_level"] * z_rng
     lo_s, hi_s = _summit_run(z >= band, int(np.argmax(z)), x, merge_gap,
                              z=z, shallow=z_top - PROCESSING["saddle_depth"] * z_rng)
-    t = int(round(0.5 * (lo_s + hi_s)))
+    # Within that run, the apex is the middle of the ground standing within a
+    # finer band of the top. On a flat top, or between two crater rims of equal
+    # height, that is still the middle of the run; on a lopsided point it stays
+    # at the point instead of sliding out along the gentler side, which is where
+    # the middle of the coarse run falls.
+    fine = np.flatnonzero(z[lo_s:hi_s + 1] >= z_top - PROCESSING["apex_level"] * z_rng) + lo_s
+    t = int(round(0.5 * (fine[0] + fine[-1]))) if len(fine) else int(np.argmax(z))
     if t < 4 or t > len(z) - 5:
         return {}, [
             f"The {w['apex']} sits at the end of the profile, so it does not cross the whole "
@@ -185,22 +194,25 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     q = PROCESSING["base_quantile"]
     base_l = float(np.quantile(left, q))
     base_r = float(np.quantile(right, q))
+    # The common (higher) base sets the flat-top and asymmetry measures; each
+    # half is still fitted all the way down to its OWN foot, so a valley with
+    # one rim far higher than the other is measured whole, not cut off at the
+    # lower rim.
     z_base = max(base_l, base_r)
     height = z_top - z_base
-    if height <= 0:
+    if height <= 0 or z_top - min(base_l, base_r) <= 0:
         return {}, ["There is no relief between the apex and the foot."]
 
     if abs(base_l - base_r) > 0.25 * height:
         notes.append(
             f"The two {w['sides']} reach their {w['foot']} {abs(base_l - base_r) / height:.0%} of the "
-            f"height apart. The nearer {w['foot']} level is used, so the other {w['side']} is measured "
-            "only as far as that level."
+            f"smaller height apart. Each half is fitted down to its own {w['foot']}."
         )
 
-    def crossing(direction: int):
+    def crossing(direction: int, zb: float):
         i = t
         while 0 <= i < len(z):
-            if z[i] <= z_base:
+            if z[i] <= zb:
                 break
             i += direction
         if i < 0 or i >= len(z):
@@ -208,10 +220,10 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
         j = i - direction
         if not (0 <= j < len(z)) or z[j] == z[i]:
             return float(x[i])
-        f = (z_base - z[i]) / (z[j] - z[i])
+        f = (zb - z[i]) / (z[j] - z[i])
         return float(x[i] + f * (x[j] - x[i]))
 
-    xl, xr = crossing(-1), crossing(+1)
+    xl, xr = crossing(-1, base_l), crossing(+1, base_r)
     if xl is None or xr is None or xr <= xl:
         return {}, [f"Could not find the {w['foot']} on both sides of the {w['apex']}."]
 
@@ -228,6 +240,7 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     kl, kr = _summit_run(above, k0, xs, merge_gap, z=zs,
                          shallow=z_top - PROCESSING["saddle_depth"] * height)
     plateau = (float(xs[kr]) - float(xs[kl])) / width if kr > kl else 0.0
+    x_flat_l, x_flat_r = (float(xs[kl]), float(xs[kr])) if kr > kl else (x_apex, x_apex)
 
     pk, _ = find_peaks(zs, prominence=0.05 * height)
     far = [k for k in pk if (xs[k] < xs[kl] or xs[k] > xs[kr]) and zs[k] >= z_base + 0.85 * height]
@@ -248,17 +261,22 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     a_l = float(np.trapezoid(depth[lm], xs[lm])) if lm.sum() > 1 else 0.0
     a_r = float(np.trapezoid(depth[rm], xs[rm])) if rm.sum() > 1 else 0.0
 
+    full = z_top - min(base_l, base_r)
     return {
-        "height": height,
+        "height": full,
         "width": width,
-        "width_height": width / height,
+        "width_height": width / full,
         "plateau": plateau,
         "asymmetry": abs(a_r - a_l) / (a_r + a_l) if (a_r + a_l) > 0 else float("nan"),
         "apex_elev": z_top,
         "base_elev": z_base,
+        "base_left": base_l,
+        "base_right": base_r,
         "x_left": xl,
         "x_right": xr,
         "x_apex": x_apex,
+        "x_flat_left": min(x_flat_l, x_apex),
+        "x_flat_right": max(x_flat_r, x_apex),
     }, notes
 
 
@@ -308,10 +326,12 @@ def half_profiles(x, z, m: dict, kind: str = HILL) -> list:
     xc, zc = _resample(x, zo, a, b)
     xa = m["x_apex"]
     out = []
-    for side, radius, sign in (("L", xa - m["x_left"], -1.0), ("R", m["x_right"] - xa, 1.0)):
+    for side, radius, sign, base in (("L", xa - m["x_left"], -1.0, m["base_left"]),
+                                     ("R", m["x_right"] - xa, 1.0, m["base_right"])):
         zz = np.interp(xa + sign * U * radius, xc, zc)
-        out.append({"side": side, "radius": float(radius), "sign": sign,
-                    "g": np.clip((zz - m["base_elev"]) / m["height"], 0.0, None)})
+        height = m["apex_elev"] - base
+        out.append({"side": side, "radius": float(radius), "sign": sign, "base": float(base),
+                    "height": float(height), "g": np.clip((zz - base) / height, 0.0, None)})
     return out
 
 
@@ -349,28 +369,52 @@ def analyse_slope(x, z) -> tuple[dict, list, list]:
         "asymmetry": float("nan"),
         "apex_elev": z_head,
         "base_elev": z_mouth,
+        "base_left": z_mouth,
+        "base_right": z_mouth,
         "x_left": min(x_head, x_mouth),
         "x_right": max(x_head, x_mouth),
         "x_apex": x_head,
     }
-    return m, notes, [{"side": "D", "radius": float(length), "sign": sign, "g": g}]
+    return m, notes, [{"side": "D", "radius": float(length), "sign": sign, "base": z_mouth,
+                       "height": float(height), "g": g}]
 
 
 # =====================================================================
-# The perfect shapes
+# The ideal curves and the fitting procedure
 #
-# Each is a height fraction g(u) of a half profile: g = 1 at the apex, 0 at the
-# foot, u = 0 at the apex, 1 at the foot. Most are members of one family,
+# Every curve is a height fraction g(u) of a half profile: g = 1 at the apex,
+# 0 at the foot, u = 0 at the apex, 1 at the foot. Every curve passes through
+# both of those points, so it is pinned to the landform the way Wadell's sphere
+# is pinned to the grain.
 #
-#     g = (1 - u^p) ^ (1/q),
+# THE FIXED PROCEDURE
 #
-# where p shapes the apex (p = 1 a sharp point, p > 1 rounded) and q shapes the
-# foot (q = 1 meets the ground at an angle, q > 1 steepens into it, q < 1 flares
-# out along it). p = q is the superellipse - the cone, the semicircle and the box
-# - and q = 1 is the power law, which holds the parabola.
+#   1. Locate the apex and each foot (analyse_profile / analyse_slope).
+#   2. Normalise each half onto its own width and its own height.
+#   3. Fit each of the three ideal families to each half. Every family has ONE
+#      free shape control, so they compete on equal terms:
+#        parabola      g = (1 - u)(1 - k u),  -1 <= k <= 1
+#        circle        a real circular arc through apex and foot, drawn in true
+#                      proportions; its control is the bulge (sagitta) of the arc
+#        superellipse  g = (1 - u^e)^(1/e)
+#      The best member is the one leaving the least rock out of place
+#      (minimum departure), found by a fine grid then a bounded refinement.
+#   4. The family with the smallest total departure over both halves is the
+#      ideal. On a tie (within 0.1% of the height) the order above wins.
+#   5. Departure, extra and missing rock are measured against that ideal.
+#
+# All three families contain the straight line (k = 0, zero bulge, e = 1), so a
+# straight-sided profile is never forced into a curve, and a curved profile is
+# never left with a bent triangle: the parabola family holds every true parabola
+# from the concave one (vertex at the foot, k = 1) to the dome or U (vertex at
+# the apex, k = -1).
 # =====================================================================
 def ideal_curve(u, p: float, q: float | None = None, cut: float = 0.0) -> np.ndarray:
-    """A member of the family, with the share `cut` of the height sliced off the apex."""
+    """g = (1 - u^p)^(1/q) with the share `cut` of the height sliced off the apex.
+
+    p = q is the superellipse. The two-exponent form is used only by the smooth
+    fit that detects a flat top or floor.
+    """
     p = max(float(p), 0.05)
     q = p if q is None else max(float(q), 0.05)
     g = np.clip(1.0 - np.clip(np.asarray(u, float), 0.0, 1.0) ** p, 0.0, None) ** (1.0 / q)
@@ -378,128 +422,222 @@ def ideal_curve(u, p: float, q: float | None = None, cut: float = 0.0) -> np.nda
     return np.minimum(g, 1.0 - c) / (1.0 - c)
 
 
-def true_circle(u, aspect: float) -> np.ndarray:
-    """The circle in true proportions: level at the apex and passing through the foot.
+def parabola_curve(u, k: float) -> np.ndarray:
+    """A true parabola (vertical axis) through apex and foot.
 
-    aspect is height / half-width. Landforms are far wider than they are high,
-    so in the normalised frame the true circle is a shallow arc, close to a
-    parabola. Steeper than 45 degrees no such arc exists without overhang, and
-    the semicircle of the normalised frame stands in.
+    k = 0 is the straight line, k = 1 the concave parabola with its vertex at
+    the foot, k = -1 the dome (or U) with its vertex at the apex. Outside that
+    range the vertex would fall inside the half and the curve would turn back.
     """
     u = np.clip(np.asarray(u, float), 0.0, 1.0)
+    k = float(np.clip(k, -1.0, 1.0))
+    return (1.0 - u) * (1.0 - k * u)
+
+
+def circle_curve(u, bulge: float, aspect: float) -> np.ndarray | None:
+    """A circular arc through apex and foot, in true proportions.
+
+    aspect is the half's height / width. bulge is the arc's sagitta as a share
+    of the chord: positive bulges outward (more rock on a hill), negative sags
+    inward, 0 is straight. Returns None where the arc would overhang or rise
+    above the apex, so no such arc is ever offered as an ideal.
+    """
+    u = np.asarray(u, float)
     a = float(aspect)
-    if not np.isfinite(a) or a <= 0 or a >= 1.0:
-        return ideal_curve(u, 2.0)
-    rho = (1.0 + a * a) / (2.0 * a)
-    return np.clip((a - rho + np.sqrt(np.maximum(rho * rho - u * u, 0.0))) / a, 0.0, 1.0)
+    if not np.isfinite(a) or a <= 0:
+        return None
+    if abs(bulge) < 1e-6:
+        return 1.0 - np.clip(u, 0.0, 1.0)
+    p0 = np.array([0.0, a])
+    p1 = np.array([1.0, 0.0])
+    chord = float(np.hypot(1.0, a))
+    mid = 0.5 * (p0 + p1)
+    nrm = np.array([a, 1.0]) / chord          # outward, away from the box corner
+    s = float(bulge) * chord
+    radius = (0.25 * chord * chord + s * s) / (2.0 * abs(s))
+    centre = mid + (s - np.sign(s) * radius) * nrm
+    q = mid + s * nrm
+    th0 = np.arctan2(*(p0 - centre)[::-1])
+    th1 = np.arctan2(*(p1 - centre)[::-1])
+    thq = np.arctan2(*(q - centre)[::-1])
+    ccw = (th1 - th0) % (2 * np.pi)
+    if (thq - th0) % (2 * np.pi) > ccw:     # Q is not on the ccw sweep, so go clockwise
+        ccw -= 2 * np.pi
+    th = th0 + np.linspace(0.0, ccw, 1601)
+    xs = centre[0] + radius * np.cos(th)
+    zs = centre[1] + radius * np.sin(th)
+    if np.any(np.diff(xs) < -1e-9) or xs.min() < -1e-6 or xs.max() > 1.0 + 1e-6:
+        return None
+    if zs.max() > a * (1.0 + 1e-6) or zs.min() < -1e-6 * a:
+        return None
+    return np.clip(np.interp(np.clip(u, 0.0, 1.0), xs, zs) / a, 0.0, 1.0)
 
 
-# The perfect shapes, from the most sagging to the fullest. "names" gives what
-# each is called on a hill, a valley and a one-sided slope. Fullness is the
-# share of the box each shape fills, the form axis of the shape chart.
-PERFECT_SHAPES = {
-    "strongly_concave": {
-        "name": "Strongly concave", "p": 0.5, "q": 0.5,
-        "names": {HILL: "strongly concave cone", VALLEY: "slot gorge (convex walls)",
-                  SLOPE: "strongly concave"},
-        "note": "A parabola tangent to both the axis and the ground: a needle-like apex and a long "
-                "apron flaring out along the ground.",
-    },
-    "concave": {
-        "name": "Concave parabola", "p": 1.0, "q": 0.5,
-        "names": {HILL: "concave-sided cone", VALLEY: "V with flaring walls",
-                  SLOPE: "concave (graded)"},
-        "note": "A parabola with its vertex at the foot: straight into the apex, flaring out "
-                "along the ground. The stratovolcano flank, and the graded river.",
-    },
-    "straight": {
-        "name": "Straight", "p": 1.0, "q": 1.0,
-        "names": {HILL: "straight-sided cone", VALLEY: "V-shaped", SLOPE: "straight"},
-        "note": "A perfect cone or a perfect V.",
-    },
+FAMILIES = {
     "parabola": {
-        "name": "Parabola", "p": 2.0, "q": 1.0,
-        "names": {HILL: "parabolic dome", VALLEY: "parabolic U", SLOPE: "convex (parabolic)"},
-        "note": "Rounded apex, meeting the ground at an angle. The classic glacial trough.",
+        "name": "Parabola", "param": "k", "grid": np.linspace(-1.0, 1.0, 201), "log": False,
+        "note": "A true parabola through the apex and the foot. k = 0 is straight, k = -1 the dome "
+                "or U with its vertex at the apex, k = 1 the concave parabola with its vertex at the foot.",
     },
     "circle": {
-        "name": "Circle (true proportions)",
-        "names": {HILL: "circular dome", VALLEY: "circular bowl", SLOPE: "convex (circular)"},
-        "note": "Wadell's sphere: a real circle, level at the apex and passing through the foot, "
-                "drawn without vertical exaggeration. On a landform much wider than it is high it is "
-                "a shallow arc, close to the parabola.",
+        "name": "Circle (true proportions)", "param": "bulge", "grid": None, "log": False,
+        "note": "Wadell's sphere: a real circular arc through the apex and the foot, drawn without "
+                "vertical exaggeration. Its bulge is the sagitta as a share of the chord.",
     },
-    "semicircle": {
-        "name": "Semicircle", "p": 2.0, "q": 2.0,
-        "names": {HILL: "semi-elliptical dome", VALLEY: "semi-elliptical U",
-                  SLOPE: "strongly convex"},
-        "note": "A semicircle once height and width are scaled to the same box, which is a "
-                "semi-ellipse in real units. Its sides meet the ground vertically.",
-    },
-    "box": {
-        "name": "Box", "p": 4.0, "q": 4.0,
-        "names": {HILL: "box / mesa", VALLEY: "box trough", SLOPE: "plateau edge"},
-        "note": "Near-vertical sides with a rounded shoulder.",
+    "superellipse": {
+        "name": "Superellipse", "param": "e", "grid": np.geomspace(0.3, 8.0, 241), "log": True,
+        "note": "g = (1 - u^e)^(1/e): e = 1 straight, e = 2 a semicircle scaled to the box, e < 1 "
+                "strongly concave with a flaring apron, e > 2 toward a box.",
     },
 }
-BEST_FIT = "best"
-BEST_FIT_NAME = "Best-fitting smooth curve"
+STRAIGHT = "straight"
+TIE = 0.001
 
-# Departure classes, the analogue of Powers' roundness classes: mean distance
-# from the nearest perfect shape, as a share of the feature's height.
+
+def family_curve(fam: str, value: float, aspect: float = float("nan")):
+    if fam == "parabola":
+        return parabola_curve(U, value)
+    if fam == "circle":
+        return circle_curve(U, value, aspect)
+    return ideal_curve(U, value)
+
+
+def _half_departure(h: dict, g) -> float:
+    """Mean |real - ideal| over the half, as a share of its height."""
+    if g is None:
+        return float("inf")
+    return float(np.trapezoid(np.abs(h["g"] - g), U))
+
+
+def with_flat(g_wall, u0: float):
+    """A wall curve that starts at the edge of a flat top or floor, u0 along the half."""
+    if g_wall is None or u0 <= 0:
+        return g_wall
+    return np.interp(np.clip((U - u0) / (1.0 - u0), 0.0, 1.0), U, g_wall)
+
+
+def fit_family(fam: str, h: dict) -> dict:
+    """The member of one family that leaves the least rock out of place on one half.
+
+    Where the half has a measured flat top or floor (h["flat_u"] > 0), the
+    ideal is flat out to the edge of it and the curve is fitted to the wall
+    beyond: a flat-floored trough is straight walls on a flat floor, not a
+    parabola stretched across the floor.
+    """
+    spec = FAMILIES[fam]
+    u0 = float(h.get("flat_u", 0.0))
+    wall = h["radius"] * (1.0 - u0)
+    aspect = h["height"] / wall if wall > 0 else float("nan")
+    grid = spec["grid"]
+    if fam == "circle":
+        # The range of arcs that neither overhang nor rise above the apex
+        # depends on the aspect, so the grid is laid over that range.
+        lo, hi = 0.0, 0.5
+        for _ in range(40):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if circle_curve(U, mid, aspect) is not None else (lo, mid)
+        grid = np.linspace(-lo, lo, 201)
+    d = np.array([_half_departure(h, with_flat(family_curve(fam, v, aspect), u0)) for v in grid])
+    if not np.isfinite(d).any():
+        return {"value": float("nan"), "departure": float("inf"), "g": None}
+    i = int(np.nanargmin(d))
+    lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
+    best_v, best_d = float(grid[i]), float(d[i])
+    if hi > lo:
+        f = (lambda t: _half_departure(h, with_flat(family_curve(fam, np.exp(t), aspect), u0))) \
+            if spec["log"] else (lambda t: _half_departure(h, with_flat(family_curve(fam, t, aspect), u0)))
+        a, b = (np.log(lo), np.log(hi)) if spec["log"] else (lo, hi)
+        r = minimize_scalar(f, bounds=(a, b), method="bounded", options={"xatol": 1e-4})
+        if r.success and r.fun < best_d:
+            best_v, best_d = (float(np.exp(r.x)) if spec["log"] else float(r.x)), float(r.fun)
+    g_wall = family_curve(fam, best_v, aspect)
+    return {"value": best_v, "departure": best_d, "g": with_flat(g_wall, u0), "g_wall": g_wall}
+
+
+# Landmarks along the form axis, from the most sagging to the fullest. They name
+# a fitted ideal by its fullness and mark the floor of the shape chart.
+PERFECT_SHAPES = {
+    "strongly_concave": {
+        "name": "Strongly concave", "g": lambda u: ideal_curve(u, 0.5),
+        "names": {HILL: "strongly concave cone", VALLEY: "slot gorge (convex walls)",
+                  SLOPE: "strongly concave"},
+    },
+    "concave": {
+        "name": "Concave parabola", "g": lambda u: parabola_curve(u, 1.0),
+        "names": {HILL: "concave-sided cone", VALLEY: "V with flaring walls",
+                  SLOPE: "concave (graded)"},
+    },
+    "gently_concave": {
+        "name": "Gently concave", "g": lambda u: parabola_curve(u, 0.5),
+        "names": {HILL: "gently concave cone", VALLEY: "V with gently flaring walls",
+                  SLOPE: "gently concave"},
+    },
+    "straight": {
+        "name": "Straight", "g": lambda u: parabola_curve(u, 0.0),
+        "names": {HILL: "straight-sided cone", VALLEY: "V-shaped", SLOPE: "straight"},
+    },
+    "gently_convex": {
+        "name": "Gently convex", "g": lambda u: parabola_curve(u, -0.5),
+        "names": {HILL: "gently convex cone", VALLEY: "rounded V", SLOPE: "gently convex"},
+    },
+    "parabola": {
+        "name": "Parabola", "g": lambda u: parabola_curve(u, -1.0),
+        "names": {HILL: "parabolic dome", VALLEY: "parabolic U", SLOPE: "convex (parabolic)"},
+    },
+    "semicircle": {
+        "name": "Semicircle", "g": lambda u: ideal_curve(u, 2.0),
+        "names": {HILL: "semi-elliptical dome", VALLEY: "semi-elliptical U",
+                  SLOPE: "strongly convex"},
+    },
+    "box": {
+        "name": "Box", "g": lambda u: ideal_curve(u, 4.0),
+        "names": {HILL: "box / mesa", VALLEY: "box trough", SLOPE: "plateau edge"},
+    },
+}
+
+# Departure classes, the analogue of Powers' roundness classes: rock out of
+# place against the best-fitting ideal, as a share of width times height.
 # PROVISIONAL - set from the synthetic and real profiles that ship with the
 # app, not from a calibrated population.
 DEPARTURE_CLASSES = (
-    (0.02, "near-ideal"),
-    (0.04, "slightly modified"),
-    (0.08, "modified"),
+    (0.01, "near-ideal"),
+    (0.025, "slightly modified"),
+    (0.05, "modified"),
     (float("inf"), "strongly modified"),
 )
 
 
-def perfect_curve(key: str, aspect: float = float("nan")) -> np.ndarray:
-    s = PERFECT_SHAPES[key]
-    if key == "circle":
-        return true_circle(U, aspect)
-    return ideal_curve(U, s["p"], s["q"])
-
-
 def fullness(g) -> float:
-    """Share of the unit box under a half profile: 0.5 for a cone, 2/3 for a parabola."""
+    """Share of the unit box under a half profile: 1/2 for a cone, 2/3 for a parabola."""
     return float(np.trapezoid(np.clip(np.asarray(g, float), 0.0, 1.0), U))
 
 
-def fit_smooth(halves: list, fit_cut: bool = True) -> dict:
-    """The smooth member of the family (apex p, foot q, flat top cut) closest to the halves.
+def landmark_for(f: float) -> str:
+    """The landmark shape whose fullness is closest to f."""
+    return min(PERFECT_SHAPES, key=lambda k: abs(fullness(PERFECT_SHAPES[k]["g"](U)) - f))
 
-    This is NOT a perfect shape: it has three free controls, so it follows the
-    gross form wherever it goes. What it leaves behind is the small-scale
-    irregularity - the roundness of grain work, where departure from the
-    nearest perfect shape is the sphericity.
+
+def fit_smooth(h: dict) -> dict:
+    """A free three-control curve (apex p, foot q, flat top cut) on one half.
+
+    Used only to tell a genuinely flat top or floor from a merely rounded one.
     """
-    # Weighted by width, as the departure is, so a narrow half does not count
-    # for as much as a wide one.
-    wts = [np.sqrt(max(h["radius"], 0.0)) for h in halves]
-
     def resid(v):
-        c = v[2] if fit_cut else 0.0
-        g = ideal_curve(U, v[0], v[1], c)
-        return np.concatenate([w * (g - h["g"]) for w, h in zip(wts, halves)])
+        return ideal_curve(U, v[0], v[1], v[2]) - h["g"]
 
     best = None
     for p0, q0 in ((0.5, 0.5), (1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (4.0, 4.0)):
-        r = least_squares(resid, [p0, q0, 0.02 if fit_cut else 0.0],
-                          bounds=([0.2, 0.2, 0.0], [8.0, 8.0, 0.7 if fit_cut else 1e-9]))
+        r = least_squares(resid, [p0, q0, 0.02], bounds=([0.2, 0.2, 0.0], [8.0, 8.0, 0.7]))
         if best is None or r.cost < best.cost:
             best = r
-    return {"p": float(best.x[0]), "q": float(best.x[1]), "cut": float(best.x[2]) if fit_cut else 0.0}
+    return {"p": float(best.x[0]), "q": float(best.x[1]), "cut": float(best.x[2])}
 
 
 def compare(halves: list, ideal: dict, kind: str) -> dict:
-    """Real minus ideal, as rock: positive is material the perfect shape does not have.
+    """Real minus ideal, as rock: positive is material the ideal does not have.
 
-    Areas are shares of the box the feature fits in (its width times its
-    height), so they are size-independent and comparable between shapes.
+    Each half is weighted by its own box (width times height), so the areas are
+    shares of the feature's box: size-independent and comparable between shapes.
     """
     rock = -1.0 if kind == VALLEY else 1.0
     excess = deficit = box = 0.0
@@ -507,7 +645,7 @@ def compare(halves: list, ideal: dict, kind: str) -> dict:
     for h in halves:
         r = rock * (h["g"] - ideal[h["side"]])
         res[h["side"]] = r
-        w = h["radius"]
+        w = h["radius"] * h["height"]
         excess += w * float(np.trapezoid(np.clip(r, 0.0, None), U))
         deficit += w * float(np.trapezoid(np.clip(-r, 0.0, None), U))
         box += w
@@ -551,24 +689,15 @@ def zone_words(comp: dict) -> str:
     found = [(k, v) for k, v in comp["zones_extra"].items() if v >= 0.02]
     found += [(k, -v) for k, v in comp["zones_missing"].items() if v >= 0.02]
     if not found:
-        return "It stays within 2% of its height of this shape everywhere."
+        return "It stays within 2% of its height of this ideal everywhere."
     found.sort(key=lambda kv: -abs(kv[1]))
     parts = [f"{'more' if v > 0 else 'less'} rock at the {k} ({v * 100:+.0f}% of the height)"
              for k, v in found]
-    return "Compared with this shape it has " + ", ".join(parts) + "."
-
-
-def shape_name(item: dict) -> str:
-    """The nearest perfect shape in the feature's own words, with a flat top or floor if measured."""
-    kind = item["kind"]
-    name = PERFECT_SHAPES[item["nearest"]]["names"][kind]
-    if kind != SLOPE and has_flat_apex(item):
-        name += f" with a {VOCAB[kind]['flat']}"
-    return name
+    return "Compared with this ideal it has " + ", ".join(parts) + "."
 
 
 def has_flat_apex(item: dict) -> bool:
-    """Flat ground at the apex that the smooth fit also needs a cut for.
+    """Flat ground at the apex that a free smooth curve also needs a cut for.
 
     The measured flat-top width alone is not enough: a rounded apex (the floor
     of a parabolic U) stays within 5% of the height of its lowest point for a
@@ -578,8 +707,18 @@ def has_flat_apex(item: dict) -> bool:
     return item["m"]["plateau"] >= 0.10 and bool(cuts) and float(np.median(cuts)) >= 0.04
 
 
+def fit_words(item: dict) -> str:
+    """The fitted ideal and its control on each half, e.g. 'parabola, k = +0.61 / +0.58'."""
+    fam = item["family"]
+    spec = FAMILIES[fam]
+    vals = item["comparisons"][fam]["params"]
+    fmt = "{:+.2f}" if fam != "superellipse" else "{:.2f}"
+    parts = " / ".join(fmt.format(vals[h["side"]]) for h in item["halves"])
+    return f"{spec['name'].lower()}, {spec['param']} = {parts}"
+
+
 def measure(x, z, kind: str = HILL) -> dict:
-    """Everything for one profile. Never raises: a failure is reported in the result."""
+    """Everything for one profile, by the fixed procedure above. Never raises."""
     item = {"kind": kind, "ok": False, "notes": [], "problem": ""}
     x = np.asarray(x, dtype=float)
     z = np.asarray(z, dtype=float)
@@ -596,6 +735,7 @@ def measure(x, z, kind: str = HILL) -> dict:
         item["problem"] = "Every elevation is the same, so there is no relief to fit."
         return item
 
+    # Steps 1 and 2: locate and normalise.
     if kind == SLOPE:
         m, notes, halves = analyse_slope(x, z)
     else:
@@ -617,38 +757,66 @@ def measure(x, z, kind: str = HILL) -> dict:
             item["notes"] = []
             return item
 
-    aspect = {h["side"]: m["height"] / h["radius"] if h["radius"] > 0 else float("nan")
-              for h in halves}
-    comparisons = {}
-    for key in PERFECT_SHAPES:
-        ideal = {h["side"]: perfect_curve(key, aspect[h["side"]]) for h in halves}
-        comparisons[key] = {"ideal": ideal, **compare(halves, ideal, kind)}
-    # The smooth curve is fitted to each half on its own, so that what it
-    # leaves behind is small-scale irregularity only, not asymmetry.
-    smooth_by_side = {h["side"]: fit_smooth([h], fit_cut=kind != SLOPE) for h in halves}
-    ideal = {h["side"]: ideal_curve(U, smooth_by_side[h["side"]]["p"], smooth_by_side[h["side"]]["q"],
-                                    smooth_by_side[h["side"]]["cut"]) for h in halves}
-    comparisons[BEST_FIT] = {"ideal": ideal, **compare(halves, ideal, kind)}
-
-    named = [k for k in PERFECT_SHAPES if np.isfinite(comparisons[k].get("departure", np.nan))]
-    nearest = min(named, key=lambda k: comparisons[k]["departure"])
-    by_side = {}
+    # A flat top or floor is measured, not fitted: the ideal is flat out to its
+    # edge and the curves are fitted to the walls beyond.
+    smooth_by_side = {h["side"]: fit_smooth(h) for h in halves} if kind != SLOPE else {}
+    flat = kind != SLOPE and has_flat_apex({"m": m, "smooth_by_side": smooth_by_side})
     for h in halves:
-        d = {k: compare([h], {h["side"]: comparisons[k]["ideal"][h["side"]]}, kind)["departure"]
-             for k in PERFECT_SHAPES}
-        k_side = min(d, key=d.get)
-        by_side[h["side"]] = {"nearest": k_side, "departure": d[k_side], "fullness": fullness(h["g"])}
-    total_w = sum(h["radius"] for h in halves)
+        edge = {"L": m["x_apex"] - m.get("x_flat_left", m["x_apex"]),
+                "R": m.get("x_flat_right", m["x_apex"]) - m["x_apex"]}.get(h["side"], 0.0)
+        if not flat or h["radius"] <= 0:
+            h["flat_u"] = 0.0
+            continue
+        # The flat is measured where the ground has dropped plateau_level of the
+        # height, a little way down the wall; follow the wall back up to where it
+        # leaves the flat, so a straight wall is fitted as straight.
+        u_edge = edge / h["radius"]
+        drop = PROCESSING["plateau_level"] * (m["apex_elev"] - m["base_elev"]) / h["height"]
+        h["flat_u"] = float(np.clip(1.0 - (1.0 - u_edge) / (1.0 - drop), 0.0, 0.9))
+
+    # Step 3: fit every family to every half.
+    comparisons = {}
+    for fam in FAMILIES:
+        fits = {h["side"]: fit_family(fam, h) for h in halves}
+        if any(f["g"] is None for f in fits.values()):
+            continue
+        ideal = {s: f["g"] for s, f in fits.items()}
+        comparisons[fam] = {"ideal": ideal, "params": {s: f["value"] for s, f in fits.items()},
+                            "wall": {s: f["g_wall"] for s, f in fits.items()},
+                            **compare(halves, ideal, kind)}
+    straight = {h["side"]: with_flat(parabola_curve(U, 0.0), h["flat_u"]) for h in halves}
+    comparisons[STRAIGHT] = {"ideal": straight, "params": {}, **compare(halves, straight, kind)}
+
+    # Step 4: the family that leaves the least rock out of place, ties to the
+    # earlier family in the fixed order.
+    fams = [f for f in FAMILIES if f in comparisons]
+    best_d = min(comparisons[f]["departure"] for f in fams)
+    family = next(f for f in fams if comparisons[f]["departure"] <= best_d + TIE)
+
+    # The name follows the wall's own form, so a flat floor does not make a V read as a U.
+    ideal_full = {h["side"]: fullness(comparisons[family]["wall"][h["side"]]) for h in halves}
+    wts = {h["side"]: h["radius"] * h["height"] for h in halves}
+    tw = sum(wts.values())
+    by_side = {h["side"]: {"fullness": fullness(h["g"]), "ideal_fullness": ideal_full[h["side"]],
+                           "departure": compare([h], {h["side"]: comparisons[family]["ideal"][h["side"]]},
+                                                kind)["departure"],
+                           "landmark": landmark_for(ideal_full[h["side"]])}
+               for h in halves}
 
     item.update(
-        ok=True, x=x, z=z, m=m, halves=halves, aspect=aspect, comparisons=comparisons,
-        smooth_by_side=smooth_by_side, nearest=nearest, by_side=by_side,
-        departure=comparisons[nearest]["departure"],
-        irregularity=comparisons[BEST_FIT].get("departure", float("nan")),
-        fullness=sum(h["radius"] * fullness(h["g"]) for h in halves) / total_w,
+        ok=True, x=x, z=z, m=m, halves=halves, comparisons=comparisons, family=family,
+        smooth_by_side=smooth_by_side, by_side=by_side,
+        departure=comparisons[family]["departure"],
+        fullness=sum(wts[s] * by_side[s]["fullness"] for s in wts) / tw,
+        ideal_fullness=sum(wts[s] * ideal_full[s] for s in wts) / tw,
     )
+    item["landmark"] = landmark_for(item["ideal_fullness"])
     item["grade"] = departure_class(item["departure"])
-    item["name"] = shape_name(item)
+    name = PERFECT_SHAPES[item["landmark"]]["names"][kind]
+    if flat:
+        name += f" with a {VOCAB[kind]['flat']}"
+    item["name"] = name
+    item["flat"] = flat
     if m["width_height"] < 1.0 or m["width_height"] > 200.0:
         item["notes"].append(
             f"The {VOCAB[kind]['feature']} is {m['width_height']:.1f} times as wide as it is high, "
@@ -667,25 +835,24 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
         "Group": group,
         "Feature": VOCAB[item["kind"]]["feature"],
         "Shape": item["name"],
-        "Nearest perfect shape": PERFECT_SHAPES[item["nearest"]]["name"],
+        "Best-fitting ideal": fit_words(item),
         "Departure": item["departure"],
         "Grade": item["grade"],
-        "Net rock": c[item["nearest"]]["net"],
+        "Net rock": c[item["family"]]["net"],
         "Fullness": item["fullness"],
-        "Irregularity": item["irregularity"],
+        "Departure from straight": c[STRAIGHT]["departure"],
     }
-    for key, s in PERFECT_SHAPES.items():
-        row[f"Departure from {s['name']}"] = c[key]["departure"]
+    for fam, spec in FAMILIES.items():
+        if fam in c:
+            row[f"Departure, best {spec['name'].lower()}"] = c[fam]["departure"]
+            for side, v in c[fam]["params"].items():
+                row[f"{spec['name']} {spec['param']} ({side})"] = v
     for side, d in item["by_side"].items():
-        row[f"Nearest ({side})"] = PERFECT_SHAPES[d["nearest"]]["name"]
         row[f"Fullness ({side})"] = d["fullness"]
+        row[f"Departure ({side})"] = d["departure"]
     row.update({
         "Width / height": item["m"]["width_height"],
         "Flat top/floor share": item["m"]["plateau"],
         "Asymmetry": item["m"]["asymmetry"],
     })
-    for side, f in item["smooth_by_side"].items():
-        row[f"Smooth fit p ({side})"] = f["p"]
-        row[f"Smooth fit q ({side})"] = f["q"]
-        row[f"Smooth fit cut ({side})"] = f["cut"]
     return row

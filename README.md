@@ -6,10 +6,11 @@ The idea comes from grain shape: Wadell fitted a sand grain with a perfect spher
 
 Every profile goes through the same fixed procedure:
 
-1. **Locate** the apex (summit, valley floor or head of a long profile) and the foot of each side.
-2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height and pinned at the apex and its own foot, so a lopsided feature, or a valley with one rim far lower than the other, keeps its shape. A valley is measured as an upside-down hill, and a long profile is one half on its own. A flat top or floor is measured, not fitted: the ideal is flat out to its edge and the curve is fitted to the wall beyond.
-3. **Fit three ideal curves to each half**, each with one free control, so they compete on equal terms:
+1. **Locate** the apex (summit, valley floor or head of a long profile) and the foot of each side. Both feet sit at one level, the higher of the two sides' bases (the rule Spectrum Jax validated on 60 real transects), so a volcano on a regional slope is read down to its own foot, not out across the slope. A valley with one rim lower than the other is read up to the lower rim.
+2. **Half profiles.** Split at the apex. Each half is scaled to its own width and pinned at the apex and the foot, so a lopsided feature keeps its shape instead of being averaged. A valley is measured as an upside-down hill, and a long profile is one half on its own. A flat top or floor is measured, not fitted: the ideal is flat out to its edge and the curve is fitted to the wall beyond.
+3. **Fit four ideal curves to each half**, each with one free control, so they compete on equal terms:
    - **Parabola** `g = (1 - u)(1 - k u)`: every true parabola, from the concave one with its vertex at the foot (k = 1) through the straight line (k = 0) to the dome or U with its vertex at the apex (k = -1).
+   - **Exponential** `g = (e^(-a u) - e^(-a)) / (1 - e^(-a))`: a = 0 is straight; a > 0 is concave, steep at the apex and still sloping at the foot, like a graded river long profile or the flank of a stratovolcano; a < 0 is convex.
    - **Circle in true proportions**: a real circular arc through apex and foot, drawn without vertical exaggeration (Wadell's sphere). Its control is the bulge of the arc.
    - **Superellipse** `g = (1 - u^e)^(1/e)`: shapes more sagging or fuller than any parabola, such as the strongly concave cone (e about 0.5), the semicircle (e = 2) and the box.
 

@@ -87,6 +87,8 @@ PROCESSING = {
     # The shorter half must be at least this share of the longer, or the line
     # does not cross the feature.
     "min_side_ratio": 0.10,
+    # Nor when one side has less than this share of the other side's relief.
+    "min_side_relief": 0.05,
 }
 
 VOCAB = {
@@ -194,19 +196,31 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     q = PROCESSING["base_quantile"]
     base_l = float(np.quantile(left, q))
     base_r = float(np.quantile(right, q))
-    # The common (higher) base sets the flat-top and asymmetry measures; each
-    # half is still fitted all the way down to its OWN foot, so a valley with
-    # one rim far higher than the other is measured whole, not cut off at the
-    # lower rim.
+    # A line that starts or ends at the apex has almost no relief on one side.
+    drops = (z_top - base_l, z_top - base_r)
+    if min(drops) < PROCESSING["min_side_relief"] * max(drops):
+        return {}, [
+            f"The {w['apex']} has almost no relief on one side: that side has only "
+            f"{min(drops) / max(drops):.0%} of the other side's. The line probably starts or ends at "
+            f"the {w['apex']}. Use a line that runs past it on both sides, or choose 'One slope'."
+        ]
+
+    # Both halves stop at the HIGHER of the two bases, at the first crossing
+    # going out from the apex (SpectrumJax's rule, checked on 60 real
+    # transects). Letting each half run down to its own base sent the lower
+    # side of a volcano on a regional slope out across the slope, far past the
+    # foot of the edifice, and the fit followed it.
     z_base = max(base_l, base_r)
     height = z_top - z_base
-    if height <= 0 or z_top - min(base_l, base_r) <= 0:
+    if height <= 0:
         return {}, ["There is no relief between the apex and the foot."]
 
     if abs(base_l - base_r) > 0.25 * height:
         notes.append(
             f"The two {w['sides']} reach their {w['foot']} {abs(base_l - base_r) / height:.0%} of the "
-            f"smaller height apart. Each half is fitted down to its own {w['foot']}."
+            f"height apart. Both are measured to the higher one, so the lower {w['side']} stops "
+            f"there: the {w['feature']} is read from its {w['apex']} to the level where both "
+            f"{w['sides']} still stand."
         )
 
     def crossing(direction: int, zb: float):
@@ -223,7 +237,7 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
         f = (zb - z[i]) / (z[j] - z[i])
         return float(x[i] + f * (x[j] - x[i]))
 
-    xl, xr = crossing(-1, base_l), crossing(+1, base_r)
+    xl, xr = crossing(-1, z_base), crossing(+1, z_base)
     if xl is None or xr is None or xr <= xl:
         return {}, [f"Could not find the {w['foot']} on both sides of the {w['apex']}."]
 
@@ -261,17 +275,16 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
     a_l = float(np.trapezoid(depth[lm], xs[lm])) if lm.sum() > 1 else 0.0
     a_r = float(np.trapezoid(depth[rm], xs[rm])) if rm.sum() > 1 else 0.0
 
-    full = z_top - min(base_l, base_r)
     return {
-        "height": full,
+        "height": height,
         "width": width,
-        "width_height": width / full,
+        "width_height": width / height,
         "plateau": plateau,
         "asymmetry": abs(a_r - a_l) / (a_r + a_l) if (a_r + a_l) > 0 else float("nan"),
         "apex_elev": z_top,
         "base_elev": z_base,
-        "base_left": base_l,
-        "base_right": base_r,
+        "base_left": z_base,
+        "base_right": z_base,
         "x_left": xl,
         "x_right": xr,
         "x_apex": x_apex,
@@ -389,11 +402,13 @@ def analyse_slope(x, z) -> tuple[dict, list, list]:
 #
 # THE FIXED PROCEDURE
 #
-#   1. Locate the apex and each foot (analyse_profile / analyse_slope).
+#   1. Locate the apex and each foot (analyse_profile / analyse_slope). Both
+#      feet sit at one level, the higher of the two sides' bases.
 #   2. Normalise each half onto its own width and its own height.
-#   3. Fit each of the three ideal families to each half. Every family has ONE
+#   3. Fit each of the four ideal families to each half. Every family has ONE
 #      free shape control, so they compete on equal terms:
 #        parabola      g = (1 - u)(1 - k u),  -1 <= k <= 1
+#        exponential   g = (e^(-a u) - e^(-a)) / (1 - e^(-a))
 #        circle        a real circular arc through apex and foot, drawn in true
 #                      proportions; its control is the bulge (sagitta) of the arc
 #        superellipse  g = (1 - u^e)^(1/e)
@@ -403,11 +418,13 @@ def analyse_slope(x, z) -> tuple[dict, list, list]:
 #      ideal. On a tie (within 0.1% of the height) the order above wins.
 #   5. Departure, extra and missing rock are measured against that ideal.
 #
-# All three families contain the straight line (k = 0, zero bulge, e = 1), so a
+# All four families contain the straight line (k = 0, a = 0, zero bulge, e = 1), so a
 # straight-sided profile is never forced into a curve, and a curved profile is
 # never left with a bent triangle: the parabola family holds every true parabola
 # from the concave one (vertex at the foot, k = 1) to the dome or U (vertex at
-# the apex, k = -1).
+# the apex, k = -1). The exponential is the concave flank that is steep at the
+# apex and still sloping at the foot: the graded river long profile, and the
+# flank of many stratovolcanoes, which no parabola or superellipse follows.
 # =====================================================================
 def ideal_curve(u, p: float, q: float | None = None, cut: float = 0.0) -> np.ndarray:
     """g = (1 - u^p)^(1/q) with the share `cut` of the height sliced off the apex.
@@ -432,6 +449,19 @@ def parabola_curve(u, k: float) -> np.ndarray:
     u = np.clip(np.asarray(u, float), 0.0, 1.0)
     k = float(np.clip(k, -1.0, 1.0))
     return (1.0 - u) * (1.0 - k * u)
+
+
+def exponential_curve(u, a: float) -> np.ndarray:
+    """An exponential decay through apex and foot.
+
+    a = 0 is the straight line, a > 0 concave (steep at the apex, still sloping
+    at the foot), a < 0 convex.
+    """
+    u = np.clip(np.asarray(u, float), 0.0, 1.0)
+    a = float(a)
+    if abs(a) < 1e-6:
+        return 1.0 - u
+    return (np.exp(-a * u) - np.exp(-a)) / (1.0 - np.exp(-a))
 
 
 def circle_curve(u, bulge: float, aspect: float) -> np.ndarray | None:
@@ -479,6 +509,12 @@ FAMILIES = {
         "note": "A true parabola through the apex and the foot. k = 0 is straight, k = -1 the dome "
                 "or U with its vertex at the apex, k = 1 the concave parabola with its vertex at the foot.",
     },
+    "exponential": {
+        "name": "Exponential", "param": "a", "grid": np.linspace(-10.0, 20.0, 301), "log": False,
+        "note": "g = (e^(-a u) - e^(-a)) / (1 - e^(-a)). a = 0 is straight, a > 0 concave: steep at "
+                "the apex and still sloping at the foot, like a graded river or the flank of a "
+                "stratovolcano. a < 0 is convex.",
+    },
     "circle": {
         "name": "Circle (true proportions)", "param": "bulge", "grid": None, "log": False,
         "note": "Wadell's sphere: a real circular arc through the apex and the foot, drawn without "
@@ -497,6 +533,8 @@ TIE = 0.001
 def family_curve(fam: str, value: float, aspect: float = float("nan")):
     if fam == "parabola":
         return parabola_curve(U, value)
+    if fam == "exponential":
+        return exponential_curve(U, value)
     if fam == "circle":
         return circle_curve(U, value, aspect)
     return ideal_curve(U, value)

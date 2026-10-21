@@ -132,8 +132,10 @@ def overlay_figure(item: dict, key: str, x_label: str, y_label: str):
     ))
     m = item["m"]
     fig.add_vline(x=m["x_apex"], line=dict(color=MUTED, width=1, dash="dot"))
-    _layout(fig, f"{choice_label(key)} pinned to the {ideal.VOCAB[item['kind']]['apex']} and to each "
-                 f"{ideal.VOCAB[item['kind']]['foot']}", 470, hovermode="x unified")
+    words = ideal.VOCAB[item["kind"]]
+    ends = f"the {words['foot']}" if item["kind"] == ideal.SLOPE else f"each {words['foot']}"
+    _layout(fig, f"{choice_label(key)} pinned to the {words['apex']} and to {ends}", 470,
+            hovermode="x unified")
     fig.update_xaxes(title=x_label)
     fig.update_yaxes(title=y_label)
     return fig
@@ -368,13 +370,18 @@ Every profile goes through the same five steps:
 
 1. **Locate.** Find the apex (the summit of a hill, the floor of a valley, the head of a long
    profile) and the foot of each side (the base of a hill, each rim of a valley, the mouth).
-2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height,
-   so a lopsided feature, or a valley with one rim far higher than the other, keeps its shape.
-3. **Fit three ideal curves to each half.** Each is pinned to the apex and the foot and has one
+   Both feet sit at one level, the higher of the two sides' bases, so a volcano on a regional
+   slope is read down to its own foot, not out across the slope. A valley with one rim lower
+   than the other is read up to the lower rim.
+2. **Half profiles.** Split at the apex. Each half is scaled to its own width, so a lopsided
+   feature keeps its shape instead of being averaged.
+3. **Fit four ideal curves to each half.** Each is pinned to the apex and the foot and has one
    free control, so they compete on equal terms:
    - **Parabola** (control *k*): every true parabola from the concave one with its vertex at the
      foot (*k* = 1) through the straight line (*k* = 0) to the dome or U with its vertex at the
      apex (*k* = -1).
+   - **Exponential** (control *a*): steep at the apex and still sloping at the foot when *a* > 0,
+     like a graded river or the flank of a stratovolcano; straight at *a* = 0, convex below it.
    - **Circle in true proportions** (control: bulge): a real circular arc, drawn without
      vertical exaggeration - Wadell's sphere.
    - **Superellipse** (control *e*): (1 - u^e)^(1/e), for shapes fuller or more sagging than any

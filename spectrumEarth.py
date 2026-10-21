@@ -13,6 +13,8 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 import dougalien_brand as brand
+import ideal_shape
+import ideal_shape_view as ideal_view
 
 import ai_client
 from scipy import sparse
@@ -1663,6 +1665,9 @@ def init_state():
         "ai_last_provider": "",
         "ai_last_response": "",
         "ai_question": "Give me a concise interpretation of this run.",
+        "ideal_chart_rows": [],
+        "ideal_distance_unit": "metres",
+        "ideal_elevation_unit": "metres",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -1708,12 +1713,18 @@ SAMPLE_FILES = {   # synthetic profiles in samples/; the Dataset Type each one s
     "Transect: asymmetric fault scarp": "sample_transect_asymmetric_fault.csv",
     "Long profile: concave river": "sample_longprofile_fluvial_concave.csv",
     "Long profile: overdeepened glacial": "sample_longprofile_glacial_overdeepened.csv",
+    # Real transects, from Spectrum Jax
+    "Real volcano: Shishaldin, clean cone": "sample_real_volcano_shishaldin_clean_cone.csv",
+    "Real volcano: Taranaki, stratovolcano": "sample_real_volcano_taranaki_stratovolcano.csv",
+    "Real volcano: Piton de la Fournaise, shield": "sample_real_volcano_pitondelafournaise_shield.csv",
+    "Real volcano: Newberry, broad with caldera": "sample_real_volcano_newberry_broad_with_caldera.csv",
+    "Real volcano: Crater Lake, caldera": "sample_real_volcano_craterlake_caldera.csv",
 }
 
 
 def sample_dataset_type(label: str) -> str:
     """The Dataset Type a sample profile suits, read from its menu label."""
-    if label.startswith("Volcano"):
+    if label.startswith("Volcano") or label.startswith("Real volcano"):
         return TOPO_VOLCANO
     if label.startswith("Long profile"):
         return TOPO_LONG_PROFILE
@@ -3161,7 +3172,7 @@ st.markdown(
     <div style="padding:0.8rem 1rem; border-radius:6px; background:#FFFFFF; border:1px solid #D6DBDA; border-left:4px solid #B4532A; margin-bottom:0.8rem;">
         <h1 style="margin:0; font-size:2rem;">Spectrum Earth</h1>
         <p style="margin:0.3rem 0 0 0;">
-            Landform and shape analysis for topographic profiles: valley transects, river long profiles and volcano radial profiles.
+            Fit any topographic profile - a valley, a hill or mountain, a river long profile - with perfect shapes, and measure how far it departs from them: Wadell's grain-shape construction applied to landforms.
         </p>
     </div>
     """,
@@ -3171,7 +3182,7 @@ st.markdown(
 # -----------------------------
 # Top control band
 # -----------------------------
-control_1, control_2, control_3, control_4 = st.columns([1.25, 1.0, 1.0, 1.15], gap="medium")
+control_1, control_ideal = st.columns([1.25, 2.2], gap="medium")
 
 with control_1:
     st.markdown("**Load Data**")
@@ -3186,6 +3197,37 @@ with control_1:
     )
     if st.button("Apply Preset", width="stretch"):
         apply_dataset_preset(dataset_type)
+
+with control_ideal:
+    st.markdown("**Ideal shape fit**")
+    _feature_names = list(ideal_view.FEATURE_CHOICES)
+    _feature_default = ideal_view.default_feature(st.session_state.dataset_type, TOPO_VOLCANO, TOPO_LONG_PROFILE)
+    ideal_feature = st.radio(
+        "What is the feature?", _feature_names, index=_feature_names.index(_feature_default),
+        horizontal=True, key=f"ideal_feature_{st.session_state.dataset_type}",
+        help="A valley is fitted from its floor up to each rim, a hill from its summit down to each "
+             "foot, and a long profile as one slope from its head to its mouth.",
+    )
+    _u1, _u2, _u3 = st.columns([1.0, 1.0, 1.0], gap="small")
+    with _u1:
+        st.selectbox("Distance units", list(ideal_view.DISTANCE_UNITS), key="ideal_distance_unit",
+                     help="Only the circle in true proportions and the width/height ratio need "
+                          "these: they compare distance with elevation directly.")
+    with _u2:
+        st.selectbox("Elevation units", list(ideal_view.ELEVATION_UNITS), key="ideal_elevation_unit")
+    with _u3:
+        st.checkbox("Crop X Range", key="crop_enabled",
+                    help="Trim the profile to one feature before fitting.")
+    st.caption(
+        "Each half of the profile is pinned at the apex and its own foot and compared with a ladder "
+        "of perfect shapes - straight-sided, parabola, circle, semicircle and more. The extra and "
+        "missing rock is the departure from the ideal."
+    )
+
+with st.expander("Settings for the other analyses (axes, smoothing, peaks, FFT, landform screening, AI)"):
+    control_2, control_3, control_4 = st.columns(3, gap="medium")
+
+with control_2:
     landform_reference_upload = None
     if st.session_state.dataset_type in TOPO_DATASET_TYPES:
         landform_reference_upload = st.file_uploader(
@@ -3197,9 +3239,6 @@ with control_1:
             ),
             key="landform_reference_upload_widget",
         )
-
-
-with control_2:
     st.markdown("**Axes & Display**")
     if st.session_state.raw_df is None:
         st.caption("Load a file to activate x/y settings.")
@@ -3208,9 +3247,8 @@ with control_2:
     st.text_input("Plot Title", key="plot_title")
     st.checkbox("Normalize Signal", key="normalize")
     st.checkbox("Log Y Axis", key="log_y")
-    st.checkbox("Crop X Range", key="crop_enabled")
 
-with control_3:
+with control_2:
     st.markdown("**Prepare Signal**")
     st.checkbox("Apply Smoothing", key="smoothing_on")
     st.selectbox("Smoothing Method", ["Savitzky-Golay", "Moving Average"], key="smoothing_method")
@@ -3220,7 +3258,7 @@ with control_3:
     st.checkbox("Detrend", key="detrend_on")
     st.checkbox("Interpolate Even Spacing", key="interpolate_on")
 
-with control_4:
+with control_3:
     st.markdown("**Peaks & Interpretation**")
     st.number_input("Peak Prominence", min_value=0.0, step=0.01, key="peak_prominence")
     st.number_input("Peak Distance", min_value=1, step=1, key="peak_distance")
@@ -3305,6 +3343,7 @@ with control_4:
 
         st.checkbox("Show uncalibrated reference rows", key="topo_show_uncalibrated")
 
+with control_4:
     st.markdown("**FFT View**")
     st.selectbox("Window Function", ["None", "Hann", "Hamming", "Blackman"], key="fft_window")
     st.checkbox("Remove Zero Frequency", key="fft_remove_zero")
@@ -3344,9 +3383,9 @@ if raw_df is None:
         <div style="padding:2.3rem 1rem; border:1px dashed #D6B27C; border-radius:6px; text-align:center; background:#FFFFFF;">
             <h3 style="margin-top:0;">Load a signal file to begin</h3>
             <p style="max-width:850px; margin:0 auto;">
-                Spectrum Earth works best with simple x-y tables: distance and elevation for valley transects, river long profiles and volcano radial profiles.
-                Once the file is loaded, the page will open into a full-width workspace with raw data, prepared signal,
-                labeled peaks, FFT view, comparison plots, landform interpretation and the shape register.
+                Spectrum Earth works with simple x-y tables: distance and elevation across a valley, over a hill or mountain,
+                or down a river long profile. Or pick one of the sample profiles. Once a profile is loaded, it is fitted with
+                perfect shapes and its departure from the ideal is measured; the Shape Chart organises many profiles by that departure.
                 For XRD, GC and SEM/EDS data, use TraceCode.
             </p>
         </div>
@@ -3423,6 +3462,21 @@ x = xy["x"].to_numpy()
 y = xy["y"].to_numpy()
 raw_x = x.copy()
 raw_y = y.copy()
+
+# The ideal-shape fit runs on the raw (cleaned, cropped) profile in common
+# units. It resamples and smooths at the scale of the feature itself, so the
+# display settings for the other analyses cannot change it.
+_kind = ideal_view.FEATURE_CHOICES[ideal_feature]
+ideal_item = ideal_shape.measure(
+    raw_x * ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit],
+    raw_y * ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit],
+    _kind,
+)
+if ideal_item.get("ok"):
+    # Draw in the file's own units.
+    _sx = ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit]
+    _sz = ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit]
+    ideal_item = ideal_view.to_display_units(ideal_item, _sx, _sz)
 
 st.session_state.status_notes = []
 if st.session_state.normalize:
@@ -3615,7 +3669,29 @@ if st.session_state.dataset_type in TOPO_DATASET_TYPES and peak_results is not N
 # -----------------------------
 # Main workspace
 # -----------------------------
-tabs = st.tabs(["Raw Trace", "Prepared Signal", "Peaks", "FFT / Frequency View", "Compare", "Interpret", "Report", "Shape Register"])
+main_tabs = st.tabs(["Ideal Shape", "Shape Chart", "Other analyses"])
+
+with main_tabs[0]:
+    ideal_view.render_ideal_tab(
+        ideal_item, st.session_state.x_label, st.session_state.y_label,
+        st.session_state.get("source_name", ""),
+    )
+
+with main_tabs[1]:
+    ideal_view.render_shape_chart(
+        ideal_item, st.session_state.get("source_name", ""), SAMPLE_FILES,
+        lambda label: ideal_view.FEATURE_CHOICES[ideal_view.default_feature(
+            sample_dataset_type(label), TOPO_VOLCANO, TOPO_LONG_PROFILE)],
+        Path(__file__).resolve().parent / "samples",
+    )
+
+with main_tabs[2]:
+    st.caption(
+        "The earlier analyses, kept for reference: signal preparation, peaks, FFT, landform "
+        "screening against published classes, and the power-law shape register. Their settings "
+        "are in the 'Settings for the other analyses' panel above."
+    )
+    tabs = st.tabs(["Raw Trace", "Prepared Signal", "Peaks", "FFT / Frequency View", "Compare", "Interpret", "Report", "Shape Register"])
 
 with tabs[0]:
     fig_raw = make_signal_plot(

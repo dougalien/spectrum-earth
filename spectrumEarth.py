@@ -1,7 +1,6 @@
 
 import io
 import os
-import sqlite3
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -22,109 +21,17 @@ from scipy.sparse.linalg import spsolve
 
 st.set_page_config(
     page_title="Spectrum Earth",
-    page_icon="📈",
+    page_icon="⛰️",
     layout="wide",
 )
 
 
-DATASET_PRESETS = {
-    "Generic Signal": {
-        "x_label": "X",
-        "y_label": "Signal",
-        "normalize": False,
-        "smoothing_on": False,
-        "smoothing_method": "Savitzky-Golay",
-        "smoothing_window": 11,
-        "baseline_on": False,
-        "baseline_method": "AsLS",
-        "asls_lambda": 1e5,
-        "asls_p": 0.01,
-        "asls_niter": 10,
-        "detrend_on": False,
-        "interpolate_on": False,
-        "peak_prominence": 0.05,
-        "peak_distance": 10,
-        "peak_width": 1.0,
-    },
-    "GC": {
-        "x_label": "Retention Time",
-        "y_label": "Intensity",
-        "normalize": False,
-        "smoothing_on": True,
-        "smoothing_method": "Savitzky-Golay",
-        "smoothing_window": 13,
-        "baseline_on": True,
-        "baseline_method": "AsLS",
-        "asls_lambda": 1e6,
-        "asls_p": 0.01,
-        "asls_niter": 12,
-        "detrend_on": False,
-        "interpolate_on": False,
-        "peak_prominence": 0.08,
-        "peak_distance": 20,
-        "peak_width": 2.0,
-    },
-    "XRD": {
-        "x_label": "2θ",
-        "y_label": "Intensity",
-        "normalize": False,
-        "smoothing_on": True,
-        "smoothing_method": "Savitzky-Golay",
-        "smoothing_window": 9,
-        "baseline_on": True,
-        "baseline_method": "AsLS",
-        "asls_lambda": 1e7,
-        "asls_p": 0.001,
-        "asls_niter": 12,
-        "detrend_on": False,
-        "interpolate_on": False,
-        "peak_prominence": 0.03,
-        "peak_distance": 12,
-        "peak_width": 1.0,
-    },
-    "SEM/EDS": {
-        "x_label": "Energy (keV)",
-        "y_label": "Counts",
-        "normalize": False,
-        "smoothing_on": True,
-        "smoothing_method": "Moving Average",
-        "smoothing_window": 7,
-        "baseline_on": True,
-        "baseline_method": "AsLS",
-        "asls_lambda": 1e5,
-        "asls_p": 0.01,
-        "asls_niter": 10,
-        "detrend_on": False,
-        "interpolate_on": False,
-        "peak_prominence": 0.04,
-        "peak_distance": 8,
-        "peak_width": 1.0,
-    },
-    "Other": {
-        "x_label": "X",
-        "y_label": "Signal",
-        "normalize": False,
-        "smoothing_on": False,
-        "smoothing_method": "Savitzky-Golay",
-        "smoothing_window": 11,
-        "baseline_on": False,
-        "baseline_method": "AsLS",
-        "asls_lambda": 1e5,
-        "asls_p": 0.01,
-        "asls_niter": 10,
-        "detrend_on": False,
-        "interpolate_on": False,
-        "peak_prominence": 0.05,
-        "peak_distance": 10,
-        "peak_width": 1.0,
-    },
-}
+DATASET_PRESETS = {}
 
 
 
 # ============================================================
 # Spectrum Earth - landform (topographic profile) extension
-# Additive only: no existing Generic/GC/XRD/SEM-EDS behaviour is changed.
 # ============================================================
 
 TOPO_TRANSECT = "Topography (Transect)"
@@ -1391,8 +1298,8 @@ def interpret_topography(
 ) -> TopographyInterpretationResult:
     """Score continuous landform metrics against class centres.
 
-    Unlike the XRD matcher, which matches discrete peak POSITIONS against a line
-    list, landforms have no diagnostic spectral positions. Each metric is instead
+    Landforms have no diagnostic spectral positions to match against a line
+    list. Each metric is instead
     scored as a Gaussian likelihood against a published class centre and spread,
     and the weighted mean likelihood is the class score. Overlapping classes
     therefore produce genuinely close scores rather than a false winner.
@@ -1608,237 +1515,6 @@ def interpret_topography(
     )
 
 
-XRD_BUILTIN_REFERENCE_ROWS = [
-    # Quartz
-    {"mineral": "Quartz", "two_theta": 20.86, "relative_intensity": 34},
-    {"mineral": "Quartz", "two_theta": 26.64, "relative_intensity": 100},
-    {"mineral": "Quartz", "two_theta": 36.54, "relative_intensity": 18},
-    {"mineral": "Quartz", "two_theta": 39.45, "relative_intensity": 14},
-    {"mineral": "Quartz", "two_theta": 40.29, "relative_intensity": 12},
-    {"mineral": "Quartz", "two_theta": 42.48, "relative_intensity": 10},
-    {"mineral": "Quartz", "two_theta": 50.13, "relative_intensity": 16},
-    {"mineral": "Quartz", "two_theta": 59.95, "relative_intensity": 7},
-    # Calcite
-    {"mineral": "Calcite", "two_theta": 23.04, "relative_intensity": 17},
-    {"mineral": "Calcite", "two_theta": 29.40, "relative_intensity": 100},
-    {"mineral": "Calcite", "two_theta": 35.96, "relative_intensity": 20},
-    {"mineral": "Calcite", "two_theta": 39.43, "relative_intensity": 14},
-    {"mineral": "Calcite", "two_theta": 43.17, "relative_intensity": 26},
-    {"mineral": "Calcite", "two_theta": 47.50, "relative_intensity": 8},
-    {"mineral": "Calcite", "two_theta": 48.50, "relative_intensity": 9},
-    {"mineral": "Calcite", "two_theta": 57.47, "relative_intensity": 7},
-    # Dolomite
-    {"mineral": "Dolomite", "two_theta": 30.95, "relative_intensity": 100},
-    {"mineral": "Dolomite", "two_theta": 41.08, "relative_intensity": 27},
-    {"mineral": "Dolomite", "two_theta": 45.72, "relative_intensity": 20},
-    {"mineral": "Dolomite", "two_theta": 50.49, "relative_intensity": 14},
-    {"mineral": "Dolomite", "two_theta": 55.43, "relative_intensity": 9},
-    {"mineral": "Dolomite", "two_theta": 65.89, "relative_intensity": 8},
-    # Halite
-    {"mineral": "Halite", "two_theta": 27.37, "relative_intensity": 100},
-    {"mineral": "Halite", "two_theta": 31.70, "relative_intensity": 58},
-    {"mineral": "Halite", "two_theta": 45.45, "relative_intensity": 26},
-    {"mineral": "Halite", "two_theta": 53.87, "relative_intensity": 22},
-    {"mineral": "Halite", "two_theta": 56.47, "relative_intensity": 8},
-    {"mineral": "Halite", "two_theta": 66.24, "relative_intensity": 18},
-    # Gypsum
-    {"mineral": "Gypsum", "two_theta": 11.62, "relative_intensity": 100},
-    {"mineral": "Gypsum", "two_theta": 20.74, "relative_intensity": 28},
-    {"mineral": "Gypsum", "two_theta": 23.40, "relative_intensity": 26},
-    {"mineral": "Gypsum", "two_theta": 29.12, "relative_intensity": 14},
-    {"mineral": "Gypsum", "two_theta": 31.10, "relative_intensity": 12},
-    {"mineral": "Gypsum", "two_theta": 33.40, "relative_intensity": 9},
-    {"mineral": "Gypsum", "two_theta": 40.68, "relative_intensity": 8},
-    # Albite
-    {"mineral": "Albite", "two_theta": 22.00, "relative_intensity": 22},
-    {"mineral": "Albite", "two_theta": 27.94, "relative_intensity": 55},
-    {"mineral": "Albite", "two_theta": 28.10, "relative_intensity": 100},
-    {"mineral": "Albite", "two_theta": 40.56, "relative_intensity": 17},
-    {"mineral": "Albite", "two_theta": 42.28, "relative_intensity": 18},
-    {"mineral": "Albite", "two_theta": 56.05, "relative_intensity": 8},
-
-]
-
-EDS_BUILTIN_REFERENCE_ROWS = [
-    {"element": "C", "line": "Kα", "energy_kev": 0.277},
-    {"element": "O", "line": "Kα", "energy_kev": 0.525},
-    {"element": "Na", "line": "Kα", "energy_kev": 1.041},
-    {"element": "Mg", "line": "Kα", "energy_kev": 1.254},
-    {"element": "Al", "line": "Kα", "energy_kev": 1.486},
-    {"element": "Si", "line": "Kα", "energy_kev": 1.740},
-    {"element": "P", "line": "Kα", "energy_kev": 2.013},
-    {"element": "S", "line": "Kα", "energy_kev": 2.307},
-    {"element": "Cl", "line": "Kα", "energy_kev": 2.622},
-    {"element": "K", "line": "Kα", "energy_kev": 3.312},
-    {"element": "Ca", "line": "Kα", "energy_kev": 3.690},
-    {"element": "Ti", "line": "Kα", "energy_kev": 4.508},
-    {"element": "Cr", "line": "Kα", "energy_kev": 5.414},
-    {"element": "Mn", "line": "Kα", "energy_kev": 5.895},
-    {"element": "Fe", "line": "Kα", "energy_kev": 6.398},
-    {"element": "Ni", "line": "Kα", "energy_kev": 7.478},
-]
-
-
-ATOMIC_WEIGHTS = {
-    "C": 12.011,
-    "O": 15.999,
-    "Na": 22.990,
-    "Mg": 24.305,
-    "Al": 26.982,
-    "Si": 28.085,
-    "P": 30.974,
-    "S": 32.060,
-    "Cl": 35.450,
-    "K": 39.098,
-    "Ca": 40.078,
-    "Ti": 47.867,
-    "Cr": 51.996,
-    "Mn": 54.938,
-    "Fe": 55.845,
-    "Ni": 58.693,
-}
-
-BASE_OXIDE_MODELS = {
-    "Na": {"oxide": "Na2O", "cation_count": 2, "oxygen_count": 1},
-    "Mg": {"oxide": "MgO", "cation_count": 1, "oxygen_count": 1},
-    "Al": {"oxide": "Al2O3", "cation_count": 2, "oxygen_count": 3},
-    "Si": {"oxide": "SiO2", "cation_count": 1, "oxygen_count": 2},
-    "P": {"oxide": "P2O5", "cation_count": 2, "oxygen_count": 5},
-    "S": {"oxide": "SO3", "cation_count": 1, "oxygen_count": 3},
-    "K": {"oxide": "K2O", "cation_count": 2, "oxygen_count": 1},
-    "Ca": {"oxide": "CaO", "cation_count": 1, "oxygen_count": 1},
-    "Ti": {"oxide": "TiO2", "cation_count": 1, "oxygen_count": 2},
-    "Cr": {"oxide": "Cr2O3", "cation_count": 2, "oxygen_count": 3},
-    "Mn": {"oxide": "MnO", "cation_count": 1, "oxygen_count": 1},
-    "Ni": {"oxide": "NiO", "cation_count": 1, "oxygen_count": 1},
-}
-
-
-EDS_COMMON_MINERAL_MODELS = [
-    {"name": "Quartz", "family": "silica", "formula": "SiO2", "oxygen_basis": 2, "targets": {"Si": 1.0}, "notes": "Pure silica end-member."},
-    {"name": "Orthoclase", "family": "feldspar", "formula": "KAlSi3O8", "oxygen_basis": 8, "targets": {"K": 1.0, "Al": 1.0, "Si": 3.0}, "notes": "K-feldspar end-member."},
-    {"name": "Albite", "family": "feldspar", "formula": "NaAlSi3O8", "oxygen_basis": 8, "targets": {"Na": 1.0, "Al": 1.0, "Si": 3.0}, "notes": "Na-feldspar end-member."},
-    {"name": "Anorthite", "family": "feldspar", "formula": "CaAl2Si2O8", "oxygen_basis": 8, "targets": {"Ca": 1.0, "Al": 2.0, "Si": 2.0}, "notes": "Ca-feldspar end-member."},
-    {"name": "Muscovite-like", "family": "mica", "formula": "KAl3Si3O12", "oxygen_basis": 12, "targets": {"K": 1.0, "Al": 3.0, "Si": 3.0}, "notes": "OH ignored for oxide-style normalization."},
-    {"name": "Talc-like", "family": "phyllosilicate", "formula": "Mg3Si4O12", "oxygen_basis": 12, "targets": {"Mg": 3.0, "Si": 4.0}, "notes": "OH ignored for oxide-style normalization."},
-    {"name": "Kaolinite-like", "family": "clay", "formula": "Al2Si2O9", "oxygen_basis": 9, "targets": {"Al": 2.0, "Si": 2.0}, "notes": "Hydrogen ignored; useful family-level clay screen."},
-    {"name": "Kyanite/Sillimanite/Andalusite", "family": "Al-silicate", "formula": "Al2SiO5", "oxygen_basis": 5, "targets": {"Al": 2.0, "Si": 1.0}, "notes": "Polymorph family-level fit only."},
-    {"name": "Forsterite", "family": "olivine", "formula": "Mg2SiO4", "oxygen_basis": 4, "targets": {"Mg": 2.0, "Si": 1.0}, "notes": "Mg-olivine end-member."},
-    {"name": "Fayalite", "family": "olivine", "formula": "Fe2SiO4", "oxygen_basis": 4, "targets": {"Fe": 2.0, "Si": 1.0}, "notes": "Fe-olivine end-member."},
-    {"name": "Enstatite", "family": "pyroxene", "formula": "Mg2Si2O6", "oxygen_basis": 6, "targets": {"Mg": 2.0, "Si": 2.0}, "notes": "Mg-pyroxene end-member."},
-    {"name": "Ferrosilite", "family": "pyroxene", "formula": "Fe2Si2O6", "oxygen_basis": 6, "targets": {"Fe": 2.0, "Si": 2.0}, "notes": "Fe-pyroxene end-member."},
-    {"name": "Diopside", "family": "pyroxene", "formula": "CaMgSi2O6", "oxygen_basis": 6, "targets": {"Ca": 1.0, "Mg": 1.0, "Si": 2.0}, "notes": "Ca-Mg clinopyroxene."},
-    {"name": "Hedenbergite", "family": "pyroxene", "formula": "CaFeSi2O6", "oxygen_basis": 6, "targets": {"Ca": 1.0, "Fe": 1.0, "Si": 2.0}, "notes": "Ca-Fe clinopyroxene."},
-    {"name": "Wollastonite", "family": "inosilicate", "formula": "CaSiO3", "oxygen_basis": 3, "targets": {"Ca": 1.0, "Si": 1.0}, "notes": "Ca-silicate chain mineral."},
-    {"name": "Pyrope", "family": "garnet", "formula": "Mg3Al2Si3O12", "oxygen_basis": 12, "targets": {"Mg": 3.0, "Al": 2.0, "Si": 3.0}, "notes": "Mg-garnet end-member."},
-    {"name": "Almandine", "family": "garnet", "formula": "Fe3Al2Si3O12", "oxygen_basis": 12, "targets": {"Fe": 3.0, "Al": 2.0, "Si": 3.0}, "notes": "Fe-garnet end-member."},
-    {"name": "Grossular", "family": "garnet", "formula": "Ca3Al2Si3O12", "oxygen_basis": 12, "targets": {"Ca": 3.0, "Al": 2.0, "Si": 3.0}, "notes": "Ca-garnet end-member."},
-    {"name": "Calcite", "family": "carbonate", "formula": "CaCO3", "oxygen_basis": 3, "targets": {"Ca": 1.0, "C": 1.0}, "notes": "Requires carbon inclusion for best fit."},
-    {"name": "Dolomite", "family": "carbonate", "formula": "CaMg(CO3)2", "oxygen_basis": 6, "targets": {"Ca": 1.0, "Mg": 1.0, "C": 2.0}, "notes": "Requires carbon inclusion for best fit."},
-    {"name": "Magnesite", "family": "carbonate", "formula": "MgCO3", "oxygen_basis": 3, "targets": {"Mg": 1.0, "C": 1.0}, "notes": "Requires carbon inclusion for best fit."},
-    {"name": "Siderite", "family": "carbonate", "formula": "FeCO3", "oxygen_basis": 3, "targets": {"Fe": 1.0, "C": 1.0}, "notes": "Requires carbon inclusion for best fit."},
-    {"name": "Rutile", "family": "oxide", "formula": "TiO2", "oxygen_basis": 2, "targets": {"Ti": 1.0}, "notes": "Ti oxide end-member."},
-    {"name": "Ilmenite", "family": "oxide", "formula": "FeTiO3", "oxygen_basis": 3, "targets": {"Fe": 1.0, "Ti": 1.0}, "notes": "Fe-Ti oxide."},
-    {"name": "Magnetite", "family": "oxide", "formula": "Fe3O4", "oxygen_basis": 4, "targets": {"Fe": 3.0}, "notes": "Fe oxidation state assumption matters."},
-    {"name": "Hematite", "family": "oxide", "formula": "Fe2O3", "oxygen_basis": 3, "targets": {"Fe": 2.0}, "notes": "Fe oxidation state assumption matters."},
-    {"name": "Periclase", "family": "oxide", "formula": "MgO", "oxygen_basis": 1, "targets": {"Mg": 1.0}, "notes": "Simple Mg oxide."},
-    {"name": "Corundum", "family": "oxide", "formula": "Al2O3", "oxygen_basis": 3, "targets": {"Al": 2.0}, "notes": "Al oxide."},
-    {"name": "Spinel", "family": "oxide", "formula": "MgAl2O4", "oxygen_basis": 4, "targets": {"Mg": 1.0, "Al": 2.0}, "notes": "Mg-Al spinel end-member."},
-    {"name": "Chromite-like", "family": "oxide", "formula": "FeCr2O4", "oxygen_basis": 4, "targets": {"Fe": 1.0, "Cr": 2.0}, "notes": "Simplified chromite-family screen."},
-    {"name": "Anhydrite", "family": "sulfate", "formula": "CaSO4", "oxygen_basis": 4, "targets": {"Ca": 1.0, "S": 1.0}, "notes": "Hydrous sulfate not modeled."},
-    {"name": "Apatite-like", "family": "phosphate", "formula": "Ca5P3O12", "oxygen_basis": 12, "targets": {"Ca": 5.0, "P": 3.0}, "notes": "Halogen/OH not modeled."},
-]
-
-TRACE_CODE_DB_NAME = "tracecode_reference_library.sqlite"
-
-def get_tracecode_db_path() -> Path:
-    try:
-        return Path(__file__).resolve().with_name(TRACE_CODE_DB_NAME)
-    except NameError:
-        return Path(TRACE_CODE_DB_NAME).resolve()
-
-def ensure_tracecode_reference_db(db_path: str | Path | None = None) -> Path:
-    db_path = Path(db_path) if db_path is not None else get_tracecode_db_path()
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS xray_lines (element TEXT, line TEXT, energy_kev REAL, relative_weight REAL)")
-    cur.execute("CREATE TABLE IF NOT EXISTS minerals (name TEXT PRIMARY KEY, family TEXT, formula TEXT, oxygen_basis REAL, notes TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS mineral_cations (mineral_name TEXT, element TEXT, apfu REAL, PRIMARY KEY (mineral_name, element))")
-
-    version = cur.execute("SELECT value FROM metadata WHERE key='library_version'").fetchone()
-    if version is None or version[0] != '1':
-        cur.execute("DELETE FROM metadata")
-        cur.execute("DELETE FROM xray_lines")
-        cur.execute("DELETE FROM minerals")
-        cur.execute("DELETE FROM mineral_cations")
-        cur.executemany(
-            "INSERT INTO xray_lines (element, line, energy_kev, relative_weight) VALUES (?, ?, ?, ?)",
-            [(row['element'], row['line'], float(row['energy_kev']), float(row.get('relative_weight', 100.0))) for row in EDS_BUILTIN_REFERENCE_ROWS],
-        )
-        cur.executemany(
-            "INSERT INTO minerals (name, family, formula, oxygen_basis, notes) VALUES (?, ?, ?, ?, ?)",
-            [(row['name'], row['family'], row.get('formula', ''), float(row['oxygen_basis']), row.get('notes', '')) for row in EDS_COMMON_MINERAL_MODELS],
-        )
-        cation_rows = []
-        for row in EDS_COMMON_MINERAL_MODELS:
-            for element, apfu in row['targets'].items():
-                cation_rows.append((row['name'], element, float(apfu)))
-        cur.executemany(
-            "INSERT INTO mineral_cations (mineral_name, element, apfu) VALUES (?, ?, ?)",
-            cation_rows,
-        )
-        cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('library_version', '1')")
-        cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('description', 'TraceCode local EDS reference and mineral formula library')")
-    conn.commit()
-    conn.close()
-    return db_path
-
-@st.cache_data(show_spinner=False)
-def load_tracecode_xray_lines(db_path: str | None = None) -> pd.DataFrame:
-    path = ensure_tracecode_reference_db(db_path)
-    conn = sqlite3.connect(path)
-    df = pd.read_sql_query("SELECT element, line, energy_kev, relative_weight FROM xray_lines ORDER BY element, energy_kev", conn)
-    conn.close()
-    return df
-
-@st.cache_data(show_spinner=False)
-def load_tracecode_mineral_models(db_path: str | None = None) -> list[dict]:
-    path = ensure_tracecode_reference_db(db_path)
-    conn = sqlite3.connect(path)
-    minerals = pd.read_sql_query("SELECT name, family, formula, oxygen_basis, notes FROM minerals ORDER BY family, name", conn)
-    cations = pd.read_sql_query("SELECT mineral_name, element, apfu FROM mineral_cations ORDER BY mineral_name, element", conn)
-    conn.close()
-    models = []
-    for _, row in minerals.iterrows():
-        subset = cations[cations['mineral_name'] == row['name']]
-        targets = {str(r['element']): float(r['apfu']) for _, r in subset.iterrows()}
-        models.append({
-            'name': str(row['name']),
-            'family': str(row['family']),
-            'formula': str(row['formula']),
-            'oxygen_basis': float(row['oxygen_basis']),
-            'notes': str(row['notes']),
-            'targets': targets,
-        })
-    return models
-
-@st.cache_data(show_spinner=False)
-def tracecode_mineral_library_preview(db_path: str | None = None) -> pd.DataFrame:
-    models = load_tracecode_mineral_models(db_path)
-    rows = []
-    for model in models:
-        rows.append({
-            'Mineral': model['name'],
-            'Family': model['family'],
-            'Formula': model.get('formula', ''),
-            'O Basis': model['oxygen_basis'],
-            'Target Cations': ', '.join(f"{el}{val:g}" for el, val in model['targets'].items()),
-            'Notes': model.get('notes', ''),
-        })
-    return pd.DataFrame(rows)
-
-
 @dataclass
 class PeakResults:
 
@@ -1854,34 +1530,6 @@ class FFTResults:
     frequencies: np.ndarray
     amplitudes: np.ndarray
     table: pd.DataFrame
-
-
-@dataclass
-class XRDInterpretationResult:
-    candidates: pd.DataFrame
-    observed_peaks: pd.DataFrame
-    matched_peaks: pd.DataFrame
-    top_candidate: str | None
-    explanation: str
-
-
-@dataclass
-class EDSInterpretationResult:
-    candidate_elements: pd.DataFrame
-    observed_peaks: pd.DataFrame
-    matched_peaks: pd.DataFrame
-    top_elements_text: str
-    phase_summary: str
-    explanation: str
-    element_proxy_table: pd.DataFrame
-    oxide_table: pd.DataFrame
-    cation_table: pd.DataFrame
-    normalized_formula: str
-    oxide_summary: str
-    formula_basis: str
-    auto_formula_candidates: pd.DataFrame
-    auto_formula_name: str
-    auto_formula_confidence: str
 
 
 LOCAL_OLLAMA_URL = os.getenv("OLLAMA_LOCAL_URL", "http://127.0.0.1:11434")
@@ -1910,13 +1558,13 @@ def call_ollama(prompt: str, model: str, base_url: str = LOCAL_OLLAMA_URL) -> st
     return str(data.get("response", "")).strip()
 
 
-def ai_warranted(dataset_type: str, xrd_interpretation, eds_interpretation, peak_results) -> bool:
-    if dataset_type in {"XRD", "SEM/EDS"} or dataset_type in TOPO_DATASET_TYPES:
+def ai_warranted(dataset_type: str, peak_results) -> bool:
+    if dataset_type in TOPO_DATASET_TYPES:
         return True
     return peak_results is not None and len(getattr(peak_results, "indices", [])) >= 3
 
 
-def build_ai_context(dataset_type: str, x_label: str, y_label: str, peak_results, fft_results, xrd_interpretation, eds_interpretation, notes: list[str], topo_interpretation=None) -> str:
+def build_ai_context(dataset_type: str, x_label: str, y_label: str, peak_results, fft_results, notes: list[str], topo_interpretation=None) -> str:
     lines = [
         f"Dataset type: {dataset_type}",
         f"Axes: {x_label} vs {y_label}",
@@ -1931,20 +1579,6 @@ def build_ai_context(dataset_type: str, x_label: str, y_label: str, peak_results
         dom = fft_results.table.iloc[0]
         lines.append(f"Dominant FFT frequency: {dom['Frequency']:.4g}")
         lines.append(f"Dominant FFT period: {dom['Period']:.4g}")
-    if xrd_interpretation is not None:
-        lines.append(f"XRD explanation: {xrd_interpretation.explanation}")
-        if not xrd_interpretation.candidates.empty:
-            lines.append("Top XRD candidates: " + "; ".join([f"{row['Mineral']} score {row['Score']} confidence {row['Confidence']}" for _, row in xrd_interpretation.candidates.head(5).iterrows()]))
-    if eds_interpretation is not None:
-        lines.append(f"EDS explanation: {eds_interpretation.explanation}")
-        if eds_interpretation.top_elements_text:
-            lines.append(f"Top EDS elements: {eds_interpretation.top_elements_text}")
-        if eds_interpretation.phase_summary:
-            lines.append(f"EDS phase summary: {eds_interpretation.phase_summary}")
-        if eds_interpretation.normalized_formula:
-            lines.append(f"EDS normalized formula: {eds_interpretation.normalized_formula}")
-        if eds_interpretation.auto_formula_name:
-            lines.append(f"EDS auto formula candidate: {eds_interpretation.auto_formula_name} ({eds_interpretation.auto_formula_confidence})")
     if topo_interpretation is not None:
         lines.append(f"Landform explanation: {topo_interpretation.explanation}")
         if not topo_interpretation.metrics.empty:
@@ -1963,12 +1597,12 @@ def builtin_summary(context: str) -> str:
     lines = [f"- {line}" for line in context.splitlines() if line.strip()]
     return ("**Built-in summary** (the AI models are busy or unavailable right now, so this lists what the analysis found):\n\n"
             + "\n".join(lines)
-            + "\n\nCheck the strongest features against the reference candidates, and treat low-confidence matches as hypotheses to test.")
+            + "\n\nCheck the measured shape against the reference landform classes, and treat low-confidence matches as hypotheses to test.")
 
 
-def generate_ai_summary(dataset_type: str, x_label: str, y_label: str, peak_results, fft_results, xrd_interpretation, eds_interpretation, notes: list[str], question: str, topo_interpretation=None, prefer_local: bool = True, ollama_model: str = "llama3.1:8b") -> tuple[str, str]:
+def generate_ai_summary(dataset_type: str, x_label: str, y_label: str, peak_results, fft_results, notes: list[str], question: str, topo_interpretation=None, prefer_local: bool = True, ollama_model: str = "llama3.1:8b") -> tuple[str, str]:
     """Answer with local Ollama (if preferred and running), then free Ollama Cloud models, then a built-in summary."""
-    context = build_ai_context(dataset_type, x_label, y_label, peak_results, fft_results, xrd_interpretation, eds_interpretation, notes, topo_interpretation)
+    context = build_ai_context(dataset_type, x_label, y_label, peak_results, fft_results, notes, topo_interpretation)
     prompt = (
         "Use the following Spectrum Earth analysis context to answer the user. "
         "Keep it concise, mention uncertainty, and stay within the evidence provided.\n\n"
@@ -1996,14 +1630,12 @@ def init_state():
         "baseline_df": None,
         "x_col": None,
         "y_col": None,
-        "dataset_type": "Generic Signal",
-        "x_label": "X",
-        "y_label": "Signal",
-        "plot_title": "Spectrum Earth Signal",
+        "dataset_type": TOPO_TRANSECT,
+        "x_label": DATASET_PRESETS[TOPO_TRANSECT]["x_label"],
+        "y_label": DATASET_PRESETS[TOPO_TRANSECT]["y_label"],
+        "plot_title": "Spectrum Earth Profile",
         "peak_results": None,
         "fft_results": None,
-        "xrd_interpretation": None,
-        "eds_interpretation": None,
         "status_notes": [],
         "last_preset_dataset": None,
         "normalize": False,
@@ -2011,14 +1643,6 @@ def init_state():
         "crop_enabled": False,
         "show_peak_labels": True,
         "label_top_n": 8,
-        "xrd_wavelength": 1.5406,
-        "xrd_tolerance": 0.25,
-        "xrd_top_n_peaks": 8,
-        "xrd_min_matches": 2,
-        "eds_tolerance": 0.08,
-        "eds_top_n_peaks": 8,
-        "eds_fe_mode": "FeO",
-        "eds_include_carbon_oxide": False,
         "fft_window": "Hann",
         "fft_remove_zero": True,
         "fft_view_mode": "Frequency",
@@ -2049,7 +1673,7 @@ def init_state():
     if "topo_metrics" not in st.session_state:
         st.session_state["topo_metrics"] = None
 
-    preset = DATASET_PRESETS["Generic Signal"]
+    preset = DATASET_PRESETS[TOPO_TRANSECT]
     for key, value in preset.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -2082,6 +1706,22 @@ SAMPLE_FILES = {   # synthetic profiles in samples/; the Dataset Type each one s
     "Long profile: concave river": "sample_longprofile_fluvial_concave.csv",
     "Long profile: overdeepened glacial": "sample_longprofile_glacial_overdeepened.csv",
 }
+
+
+def sample_dataset_type(label: str) -> str:
+    """The Dataset Type a sample profile suits, read from its menu label."""
+    if label.startswith("Volcano"):
+        return TOPO_VOLCANO
+    if label.startswith("Long profile"):
+        return TOPO_LONG_PROFILE
+    return TOPO_TRANSECT
+
+
+def on_sample_change():
+    choice = st.session_state.sample_choice
+    if choice != "None":
+        st.session_state.dataset_type = sample_dataset_type(choice)
+        apply_dataset_preset(st.session_state.dataset_type)
 
 
 def read_uploaded_file(uploaded_file):
@@ -2396,29 +2036,6 @@ def make_fft_plot(
     return fig
 
 
-def xrd_d_spacing_from_two_theta(two_theta_deg: pd.Series | np.ndarray | float, wavelength: float) -> np.ndarray:
-    two_theta = np.asarray(two_theta_deg, dtype=float)
-    theta_rad = np.radians(two_theta / 2.0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        d = wavelength / (2.0 * np.sin(theta_rad))
-    return d
-
-
-def xrd_two_theta_from_d(d_spacing: pd.Series | np.ndarray | float, wavelength: float) -> np.ndarray:
-    d = np.asarray(d_spacing, dtype=float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = wavelength / (2.0 * d)
-    ratio = np.clip(ratio, -1, 1)
-    theta_rad = np.arcsin(ratio)
-    return np.degrees(2.0 * theta_rad)
-
-
-def builtin_xrd_reference_df(wavelength: float) -> pd.DataFrame:
-    df = pd.DataFrame(XRD_BUILTIN_REFERENCE_ROWS)
-    df["d_spacing"] = xrd_d_spacing_from_two_theta(df["two_theta"].to_numpy(), wavelength)
-    return df
-
-
 def load_reference_table(uploaded_file) -> pd.DataFrame:
     df = read_uploaded_file(uploaded_file)
     df.columns = [str(c).strip().lower() for c in df.columns]
@@ -2435,668 +2052,8 @@ def load_reference_table(uploaded_file) -> pd.DataFrame:
     return df
 
 
-def standardize_xrd_reference(df: pd.DataFrame, wavelength: float) -> pd.DataFrame:
-    out = df.copy()
-    out.columns = [str(c).strip().lower() for c in out.columns]
-    out["mineral"] = out["mineral"].astype(str).str.strip()
-
-    if "two_theta" in out.columns:
-        out["two_theta"] = pd.to_numeric(out["two_theta"], errors="coerce")
-    if "d_spacing" in out.columns:
-        out["d_spacing"] = pd.to_numeric(out["d_spacing"], errors="coerce")
-    if "relative_intensity" in out.columns:
-        out["relative_intensity"] = pd.to_numeric(out["relative_intensity"], errors="coerce")
-    else:
-        out["relative_intensity"] = 100.0
-
-    if "two_theta" not in out.columns:
-        out["two_theta"] = xrd_two_theta_from_d(out["d_spacing"].to_numpy(), wavelength)
-    if "d_spacing" not in out.columns:
-        out["d_spacing"] = xrd_d_spacing_from_two_theta(out["two_theta"].to_numpy(), wavelength)
-
-    out = out.dropna(subset=["mineral", "two_theta", "d_spacing", "relative_intensity"]).copy()
-    out = out[(out["two_theta"] > 0) & (out["relative_intensity"] > 0)].copy()
-    out["relative_intensity"] = out["relative_intensity"] / out["relative_intensity"].groupby(out["mineral"]).transform("max") * 100.0
-    return out.sort_values(["mineral", "two_theta"]).reset_index(drop=True)
-
-
-
-def builtin_eds_reference_df() -> pd.DataFrame:
-    try:
-        out = load_tracecode_xray_lines()
-        if not out.empty:
-            return out
-    except Exception:
-        pass
-    out = pd.DataFrame(EDS_BUILTIN_REFERENCE_ROWS)
-    out["relative_weight"] = 100.0
-    return out
-
-
-def load_eds_reference_table(uploaded_file) -> pd.DataFrame:
-    df = read_uploaded_file(uploaded_file)
-    df.columns = [str(c).strip().lower() for c in df.columns]
-
-    if "element" not in df.columns:
-        raise ValueError("EDS reference table needs an 'element' column.")
-    if "energy_kev" not in df.columns:
-        raise ValueError("EDS reference table needs an 'energy_kev' column.")
-
-    if "line" not in df.columns:
-        df["line"] = "line"
-    if "relative_weight" not in df.columns:
-        df["relative_weight"] = 100.0
-
-    return df
-
-
-def standardize_eds_reference(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    out.columns = [str(c).strip().lower() for c in out.columns]
-    out["element"] = out["element"].astype(str).str.strip()
-    out["line"] = out["line"].astype(str).str.strip()
-    out["energy_kev"] = pd.to_numeric(out["energy_kev"], errors="coerce")
-    out["relative_weight"] = pd.to_numeric(out.get("relative_weight", 100.0), errors="coerce")
-    out = out.dropna(subset=["element", "line", "energy_kev", "relative_weight"]).copy()
-    out = out[(out["energy_kev"] > 0) & (out["relative_weight"] > 0)].copy()
-    out["relative_weight"] = out["relative_weight"] / out["relative_weight"].groupby(out["element"]).transform("max") * 100.0
-    return out.sort_values(["element", "energy_kev"]).reset_index(drop=True)
-
-
-
-def get_eds_oxide_models(fe_mode: str = "FeO", include_carbon: bool = False) -> dict[str, dict]:
-    models = dict(BASE_OXIDE_MODELS)
-    if fe_mode == "Fe2O3":
-        models["Fe"] = {"oxide": "Fe2O3", "cation_count": 2, "oxygen_count": 3}
-    else:
-        models["Fe"] = {"oxide": "FeO", "cation_count": 1, "oxygen_count": 1}
-    if include_carbon:
-        models["C"] = {"oxide": "CO2", "cation_count": 1, "oxygen_count": 2}
-    return models
-
-
-def oxide_molar_mass(element: str, model: dict) -> float:
-    return (model["cation_count"] * ATOMIC_WEIGHTS[element]) + (model["oxygen_count"] * ATOMIC_WEIGHTS["O"])
-
-
-def format_formula_from_cations(cation_map: dict[str, float], oxygen_basis: float) -> str:
-    parts = []
-    preferred_order = ["K", "Na", "Ca", "Mg", "Fe", "Ti", "Al", "Si", "P", "S", "C", "Cr", "Mn", "Ni"]
-    seen = set()
-    for element in preferred_order + sorted(cation_map.keys()):
-        if element in seen:
-            continue
-        seen.add(element)
-        value = float(cation_map.get(element, 0.0))
-        if value >= 0.03:
-            parts.append(f"{element}{value:.2f}")
-    if np.isfinite(oxygen_basis) and oxygen_basis > 0:
-        parts.append(f"O{oxygen_basis:.2f}")
-    return " ".join(parts)
-
-
-def infer_family_from_name(name: str) -> str:
-    try:
-        models = load_tracecode_mineral_models()
-    except Exception:
-        models = EDS_COMMON_MINERAL_MODELS
-    for model in models:
-        if model["name"] == name:
-            return str(model["family"])
-    return "unknown"
-
-
-def score_formula_candidate(normalized_cations: dict[str, float], template_targets: dict[str, float]) -> tuple[float, str, float, float]:
-    """Score a normalized formula candidate.
-
-    This version is intentionally stricter than the first pass:
-    a candidate should explain most of the major cation budget, not just one
-    convenient subset. That keeps Ca-Fe-Si spectra from collapsing to Quartz.
-    """
-    penalty = 0.0
-    notes = []
-
-    total_observed = sum(max(float(v), 0.0) for v in normalized_cations.values())
-    expected_total = sum(max(float(v), 0.0) for v in template_targets.values())
-    matched_total = sum(max(float(normalized_cations.get(el, 0.0)), 0.0) for el in template_targets)
-    extra_total = max(total_observed - matched_total, 0.0)
-
-    for element, target in template_targets.items():
-        target = float(target)
-        obs = float(normalized_cations.get(element, 0.0))
-        diff = abs(obs - target)
-        scale = max(target, 0.35)
-        penalty += 1.25 * (diff / scale)
-        if target >= 0.5 and obs < 0.2 * target:
-            penalty += 1.4
-            notes.append(f"missing {element}")
-        elif diff > 0.25 * max(target, 0.5):
-            notes.append(f"{element} off target")
-
-    for element, obs in normalized_cations.items():
-        obs = float(obs)
-        if element in template_targets or obs <= 0:
-            continue
-        frac = obs / max(total_observed, 1e-9)
-        # Penalize extra major cations strongly.
-        if obs >= 0.20 or frac >= 0.10:
-            penalty += 3.0 * obs + 2.5 * frac
-            notes.append(f"extra major {element}")
-        elif obs >= 0.08:
-            penalty += 1.0 * obs
-            notes.append(f"minor extra {element}")
-
-    if expected_total > 0:
-        penalty += 0.50 * abs(matched_total - expected_total) / expected_total
-
-    chemistry_coverage = matched_total / max(total_observed, 1e-9)
-    unmatched_fraction = extra_total / max(total_observed, 1e-9)
-
-    raw_score = max(0.0, 100.0 - 18.0 * penalty)
-    # Force the candidate to explain most of the chemistry.
-    score = raw_score * (chemistry_coverage ** 1.6) * (max(0.0, 1.0 - unmatched_fraction) ** 1.2)
-
-    # Hard guard against single-component fits swallowing major extra cations.
-    if len(template_targets) <= 2 and unmatched_fraction > 0.18:
-        score = min(score, 28.0)
-    if unmatched_fraction > 0.35:
-        score = min(score, 20.0)
-
-    if score >= 82:
-        confidence = "high"
-    elif score >= 62:
-        confidence = "moderate"
-    elif score >= 45:
-        confidence = "low"
-    else:
-        confidence = "very low"
-
-    if chemistry_coverage < 0.75:
-        notes.append("poor chemistry coverage")
-    if unmatched_fraction > 0.20:
-        notes.append("major unmatched cations")
-
-    return score, ", ".join(dict.fromkeys(notes[:5])) if notes else "good cation fit", chemistry_coverage, unmatched_fraction
-
-
-def build_auto_oxygen_formula_candidates(cation_moles: dict[str, float], total_oxygen: float) -> tuple[pd.DataFrame, str, str, str, str]:
-    empty = pd.DataFrame(columns=["Candidate", "Family", "Reference Formula", "O Basis", "Score", "Confidence", "Chemistry Coverage %", "Unmatched Cations %", "Normalized Formula", "Fit Notes"])
-    if not cation_moles or total_oxygen <= 0:
-        return empty, "", "", "", ""
-
-    try:
-        mineral_models = load_tracecode_mineral_models()
-    except Exception:
-        mineral_models = EDS_COMMON_MINERAL_MODELS
-
-    rows = []
-    for model in mineral_models:
-        oxygen_basis = float(model["oxygen_basis"])
-        factor = oxygen_basis / total_oxygen
-        normalized = {el: float(val) * factor for el, val in cation_moles.items()}
-        score, fit_notes, chemistry_coverage, unmatched_fraction = score_formula_candidate(normalized, model["targets"])
-        formula = format_formula_from_cations(normalized, oxygen_basis)
-        rows.append({
-            "Candidate": model["name"],
-            "Family": model["family"],
-            "Reference Formula": model.get("formula", ""),
-            "O Basis": oxygen_basis,
-            "Score": round(score, 1),
-            "Confidence": "high" if score >= 82 else "moderate" if score >= 62 else "low" if score >= 45 else "very low",
-            "Chemistry Coverage %": round(100.0 * chemistry_coverage, 1),
-            "Unmatched Cations %": round(100.0 * unmatched_fraction, 1),
-            "Normalized Formula": formula,
-            "Fit Notes": fit_notes,
-        })
-
-    candidates = pd.DataFrame(rows).sort_values(["Score", "Chemistry Coverage %", "Candidate"], ascending=[False, False, True]).reset_index(drop=True)
-    if candidates.empty:
-        return empty, "", "", "", ""
-
-    best = candidates.iloc[0]
-    best_name = str(best["Candidate"])
-    best_confidence = str(best["Confidence"])
-    best_formula = str(best["Normalized Formula"])
-    best_basis = f"Auto-normalized to O={float(best['O Basis']):.0f} on the best local mineral-library fit ({best_name})."
-    family = infer_family_from_name(best_name)
-    if float(best["Score"]) >= 62:
-        summary = f"Best local mineral-library fit: {best_name} ({family}, O={float(best['O Basis']):.0f}, {best_confidence} confidence, {float(best['Chemistry Coverage %']):.0f}% chemistry coverage)."
-    else:
-        summary = f"No strong local mineral-library formula fit yet. Best provisional oxygen-basis match is {best_name} ({family}, O={float(best['O Basis']):.0f}, {best_confidence} confidence, {float(best['Chemistry Coverage %']):.0f}% chemistry coverage)."
-    return candidates, best_name, best_confidence, best_formula, best_basis + " " + summary
-
-
-def estimate_eds_oxide_chemistry(
-    candidates_df: pd.DataFrame | None,
-    fe_mode: str = "FeO",
-    include_carbon: bool = False,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str, str, str, pd.DataFrame, str, str]:
-    empty_proxy = pd.DataFrame(columns=["Element", "Raw Proxy", "Element Proxy %"])
-    empty_oxide = pd.DataFrame(columns=["Element", "Oxide", "Element Proxy %", "Oxide wt%", "Oxygen from Stoich"])
-    empty_cation = pd.DataFrame(columns=["Element", "Oxide", "Cation Moles", "Normalized Cations"])
-    empty_auto = pd.DataFrame(columns=["Candidate", "Family", "Reference Formula", "O Basis", "Score", "Confidence", "Chemistry Coverage %", "Unmatched Cations %", "Normalized Formula", "Fit Notes"])
-
-    if candidates_df is None or candidates_df.empty:
-        return empty_proxy, empty_oxide, empty_cation, "", "", "", empty_auto, "", ""
-
-    models = get_eds_oxide_models(fe_mode=fe_mode, include_carbon=include_carbon)
-    working = candidates_df.copy()
-    working["Score"] = pd.to_numeric(working["Score"], errors="coerce").fillna(0.0)
-    working["Matched Peaks"] = pd.to_numeric(working["Matched Peaks"], errors="coerce").fillna(0.0)
-    if "Signal Proxy" in working.columns:
-        working["Signal Proxy"] = pd.to_numeric(working["Signal Proxy"], errors="coerce").fillna(0.0)
-    else:
-        working["Signal Proxy"] = working["Score"] * 100.0
-
-    working = working[working["Element"].isin(models)].copy()
-    if working.empty:
-        return empty_proxy, empty_oxide, empty_cation, "", "", "", empty_auto, "", ""
-
-    working["Raw Proxy"] = working["Score"] * (1.0 + 0.15 * np.maximum(working["Matched Peaks"] - 1.0, 0.0))
-    working = working[working["Raw Proxy"] > 0].copy()
-    if working.empty:
-        return empty_proxy, empty_oxide, empty_cation, "", "", "", empty_auto, "", ""
-
-    working["Element Proxy %"] = working["Raw Proxy"] / working["Raw Proxy"].sum() * 100.0
-    element_proxy_table = working[["Element", "Raw Proxy", "Element Proxy %"]].sort_values("Element Proxy %", ascending=False).reset_index(drop=True)
-
-    oxide_rows = []
-    for _, row in element_proxy_table.iterrows():
-        element = row["Element"]
-        model = models[element]
-        aw = ATOMIC_WEIGHTS[element]
-        mw = oxide_molar_mass(element, model)
-        oxide_raw = row["Element Proxy %"] * (mw / (model["cation_count"] * aw))
-        oxide_rows.append({
-            "Element": element,
-            "Oxide": model["oxide"],
-            "Element Proxy %": row["Element Proxy %"],
-            "Oxide Raw": oxide_raw,
-            "Molar Mass": mw,
-            "Cation Count": model["cation_count"],
-            "Oxygen Count": model["oxygen_count"],
-        })
-
-    oxide_df = pd.DataFrame(oxide_rows)
-    oxide_df["Oxide wt%"] = oxide_df["Oxide Raw"] / oxide_df["Oxide Raw"].sum() * 100.0
-    oxide_df["Oxide Moles"] = oxide_df["Oxide wt%"] / oxide_df["Molar Mass"]
-    oxide_df["Cation Moles"] = oxide_df["Oxide Moles"] * oxide_df["Cation Count"]
-    oxide_df["Oxygen from Stoich"] = oxide_df["Oxide Moles"] * oxide_df["Oxygen Count"]
-
-    total_oxygen = float(oxide_df["Oxygen from Stoich"].sum())
-    cation_mole_map = {str(row["Element"]): float(row["Cation Moles"]) for _, row in oxide_df.iterrows()}
-    auto_candidates_df, auto_formula_name, auto_formula_confidence, auto_formula, auto_basis_text = build_auto_oxygen_formula_candidates(cation_mole_map, total_oxygen)
-
-    best_o_basis = np.nan
-    if not auto_candidates_df.empty:
-        best_o_basis = float(auto_candidates_df.iloc[0]["O Basis"])
-
-    if np.isfinite(best_o_basis) and best_o_basis > 0 and total_oxygen > 0:
-        norm_factor = best_o_basis / total_oxygen
-        formula_basis = auto_basis_text
-    else:
-        if "Si" in oxide_df["Element"].values and float(oxide_df.loc[oxide_df["Element"] == "Si", "Cation Moles"].iloc[0]) > 0:
-            basis_element = "Si"
-        else:
-            basis_element = str(oxide_df.sort_values("Cation Moles", ascending=False).iloc[0]["Element"])
-        basis_moles = float(oxide_df.loc[oxide_df["Element"] == basis_element, "Cation Moles"].iloc[0])
-        norm_factor = 1.0 / basis_moles if basis_moles > 0 else np.nan
-        best_o_basis = total_oxygen * norm_factor if np.isfinite(norm_factor) else np.nan
-        formula_basis = f"Cations normalized to {basis_element}=1.00 with oxygen inferred by stoichiometric oxide balance."
-
-    cation_df = oxide_df[["Element", "Oxide", "Cation Moles"]].copy()
-    cation_df["Normalized Cations"] = cation_df["Cation Moles"] * norm_factor if np.isfinite(norm_factor) else np.nan
-    cation_df = cation_df.sort_values("Normalized Cations", ascending=False).reset_index(drop=True)
-
-    cation_map = {str(row["Element"]): float(row["Normalized Cations"]) for _, row in cation_df.iterrows() if pd.notna(row["Normalized Cations"])}
-    normalized_formula = auto_formula if auto_formula else format_formula_from_cations(cation_map, float(best_o_basis) if np.isfinite(best_o_basis) else np.nan)
-
-    c = cation_map
-    si = c.get("Si", 0.0)
-    al = c.get("Al", 0.0)
-    mg = c.get("Mg", 0.0)
-    fe = c.get("Fe", 0.0)
-    ca = c.get("Ca", 0.0)
-    na = c.get("Na", 0.0)
-    k = c.get("K", 0.0)
-    ti = c.get("Ti", 0.0)
-    p = c.get("P", 0.0)
-    s = c.get("S", 0.0)
-    carbon = c.get("C", 0.0)
-
-    summary_bits = []
-    if auto_formula_name:
-        summary_bits.append(f"Best auto-normalized common-mineral formula fit: {auto_formula_name} ({auto_formula_confidence} confidence).")
-    if si >= 0.85 and al < 0.15 and (mg + fe + ca + na + k) < 0.25:
-        summary_bits.append("Silica-rich oxide chemistry; quartz or silica-rich material is plausible.")
-    if si > 0.30 and al > 0.15 and (na + k + ca) > 0.10:
-        al_si = al / max(si, 1e-9)
-        if k >= max(na, ca) and 0.15 <= al_si <= 0.70:
-            summary_bits.append("K-rich aluminosilicate chemistry; K-feldspar or mica-like material is plausible.")
-        elif (na + ca) > 0.10 and 0.15 <= al_si <= 0.90:
-            summary_bits.append("Na/Ca aluminosilicate chemistry; feldspar or plagioclase-like material is plausible.")
-    if si > 0.20 and (mg + fe) > 0.25:
-        summary_bits.append("Ferromagnesian silicate chemistry is plausible.")
-    if ca > 0.20 and carbon > 0.05:
-        summary_bits.append("Carbonate-style oxide chemistry is plausible if the carbon signal is real.")
-    if ca > 0.15 and s > 0.05:
-        summary_bits.append("Sulfate-style chemistry is plausible.")
-    if fe > 0.45 and si < 0.20:
-        summary_bits.append("Iron-oxide-dominant chemistry is plausible.")
-    if fe > 0.30 and ti > 0.08:
-        summary_bits.append("Fe-Ti oxide chemistry is plausible.")
-    if ca > 0.15 and p > 0.05:
-        summary_bits.append("Phosphate-bearing chemistry is plausible.")
-
-    oxide_summary = " ".join(dict.fromkeys(summary_bits)) if summary_bits else "Oxide-normalized chemistry is available, but the cation ratios do not point strongly to a single mineral family yet."
-
-    oxide_df = oxide_df[["Element", "Oxide", "Element Proxy %", "Oxide wt%", "Oxygen from Stoich"]].sort_values("Oxide wt%", ascending=False).reset_index(drop=True)
-    cation_df = cation_df[["Element", "Oxide", "Cation Moles", "Normalized Cations"]]
-
-    return element_proxy_table, oxide_df, cation_df, normalized_formula, oxide_summary, formula_basis, auto_candidates_df, auto_formula_name, auto_formula_confidence
-
-
-def infer_eds_phase_summary(elements: set[str]) -> str:
-    e = set(elements)
-    summaries = []
-
-    if {"Si", "O"}.issubset(e):
-        summaries.append("Silicate or silica-bearing material is plausible.")
-    if {"Al", "Si", "O"}.issubset(e):
-        summaries.append("Aluminosilicate material is plausible.")
-    if {"K", "Al", "Si", "O"}.issubset(e) or {"Na", "Al", "Si", "O"}.issubset(e) or {"Ca", "Al", "Si", "O"}.issubset(e):
-        summaries.append("Feldspar or feldspar-rich material is plausible.")
-    if {"Mg", "Si", "O"}.issubset(e) or {"Fe", "Mg", "Si", "O"}.issubset(e):
-        summaries.append("Mafic silicate material is plausible.")
-    if {"Ca", "C", "O"}.issubset(e):
-        summaries.append("Carbonate chemistry is plausible.")
-    if {"Ca", "S", "O"}.issubset(e):
-        summaries.append("Sulfate chemistry is plausible.")
-    if {"Fe", "O"}.issubset(e):
-        summaries.append("Iron oxide or Fe-bearing silicate chemistry is plausible.")
-    if {"Ti", "O"}.issubset(e):
-        summaries.append("Titanium oxide or Ti-bearing phase is plausible.")
-    if {"Na", "Cl"}.issubset(e):
-        summaries.append("Halide chemistry is plausible.")
-    if {"P", "Ca", "O"}.issubset(e):
-        summaries.append("Phosphate chemistry is plausible.")
-
-    if summaries:
-        return " ".join(dict.fromkeys(summaries))
-    if e:
-        return "Element matches are available, but the element combination does not strongly constrain a single mineral family yet."
-    return "No convincing element matches were found yet."
-
-
-def interpret_eds(
-    peak_results: PeakResults | None,
-    tolerance_kev: float,
-    top_n_observed: int,
-    reference_df: pd.DataFrame,
-) -> EDSInterpretationResult:
-    empty_candidates = pd.DataFrame(columns=["Element", "Score", "Confidence", "Matched Peaks", "Matched Energies", "Likely Lines", "Signal Proxy"])
-    empty_obs = pd.DataFrame(columns=["Observed Energy (keV)", "Observed Relative Intensity"])
-    empty_match = pd.DataFrame(columns=["Element", "Observed Energy (keV)", "Observed Relative Intensity", "Reference Energy (keV)", "ΔE (keV)", "Line", "Reference X", "Reference Label"])
-    empty_proxy = pd.DataFrame(columns=["Element", "Raw Proxy", "Element Proxy %"])
-    empty_oxide = pd.DataFrame(columns=["Element", "Oxide", "Element Proxy %", "Oxide wt%", "Oxygen from Stoich"])
-    empty_cation = pd.DataFrame(columns=["Element", "Oxide", "Cation Moles", "Normalized Cations"])
-
-    if peak_results is None or peak_results.table.empty:
-        return EDSInterpretationResult(
-            candidate_elements=empty_candidates,
-            observed_peaks=empty_obs,
-            matched_peaks=empty_match,
-            top_elements_text="",
-            phase_summary="",
-            explanation="No peaks are available yet for SEM/EDS interpretation.",
-            element_proxy_table=empty_proxy,
-            oxide_table=empty_oxide,
-            cation_table=empty_cation,
-            normalized_formula="",
-            oxide_summary="",
-            formula_basis="",
-            auto_formula_candidates=pd.DataFrame(columns=["Candidate", "Family", "O Basis", "Score", "Confidence", "Normalized Formula", "Fit Notes"]),
-            auto_formula_name="",
-            auto_formula_confidence="",
-        )
-
-    observed = peak_results.table.copy()
-    observed = observed.sort_values("Intensity", ascending=False).head(int(max(top_n_observed, 1))).copy()
-    observed["Observed Relative Intensity"] = observed["Intensity"] / observed["Intensity"].max() * 100.0
-    observed["Observed Energy (keV)"] = observed["X Position"]
-
-    candidates = []
-    matched_rows = []
-
-    for element, group in reference_df.groupby("element"):
-        ref = group.sort_values("relative_weight", ascending=False).reset_index(drop=True)
-        used_ref_idx = set()
-        element_matches = []
-        score = 0.0
-
-        for _, obs_row in observed.iterrows():
-            candidates_for_obs = ref[np.abs(ref["energy_kev"] - obs_row["Observed Energy (keV)"]) <= tolerance_kev].copy()
-            if used_ref_idx:
-                candidates_for_obs = candidates_for_obs[~candidates_for_obs.index.isin(used_ref_idx)]
-            if candidates_for_obs.empty:
-                continue
-
-            candidates_for_obs["delta"] = np.abs(candidates_for_obs["energy_kev"] - obs_row["Observed Energy (keV)"])
-            best_ref = candidates_for_obs.sort_values(["delta", "relative_weight"], ascending=[True, False]).iloc[0]
-            used_ref_idx.add(best_ref.name)
-
-            closeness = max(0.0, 1.0 - (best_ref["delta"] / max(tolerance_kev, 1e-9)))
-            intensity_weight = (0.65 * (obs_row["Observed Relative Intensity"] / 100.0)) + (0.35 * (best_ref["relative_weight"] / 100.0))
-            peak_score = closeness * intensity_weight
-            score += peak_score
-
-            element_matches.append({
-                "Element": element,
-                "Observed Energy (keV)": obs_row["Observed Energy (keV)"],
-                "Observed Relative Intensity": obs_row["Observed Relative Intensity"],
-                "Reference Energy (keV)": best_ref["energy_kev"],
-                "ΔE (keV)": best_ref["delta"],
-                "Line": best_ref["line"],
-                "Reference X": best_ref["energy_kev"],
-                "Reference Label": f"{element} {best_ref['line']}",
-            })
-
-        match_count = len(element_matches)
-        if match_count < 1:
-            continue
-
-        matched_energies = ", ".join(f"{m['Observed Energy (keV)']:.3f}" for m in sorted(element_matches, key=lambda x: x["Observed Energy (keV)"]))
-        likely_lines = ", ".join(dict.fromkeys(m["Line"] for m in element_matches))
-        confidence = "moderate" if score >= 1.0 or match_count >= 2 else "low"
-
-        signal_proxy = sum(float(m.get("Observed Relative Intensity", 0.0)) for m in element_matches)
-        candidates.append({
-            "Element": element,
-            "Score": round(score, 3),
-            "Confidence": confidence,
-            "Matched Peaks": match_count,
-            "Matched Energies": matched_energies,
-            "Likely Lines": likely_lines,
-            "Signal Proxy": round(signal_proxy, 2),
-        })
-        matched_rows.extend(element_matches)
-
-    if not candidates:
-        return EDSInterpretationResult(
-            candidate_elements=empty_candidates,
-            observed_peaks=observed[["Observed Energy (keV)", "Observed Relative Intensity"]],
-            matched_peaks=empty_match,
-            top_elements_text="",
-            phase_summary="",
-            explanation="No elemental line matches met the current SEM/EDS tolerance. Try widening the tolerance a little or adjusting peak settings.",
-            element_proxy_table=empty_proxy,
-            oxide_table=empty_oxide,
-            cation_table=empty_cation,
-            normalized_formula="",
-            oxide_summary="",
-            formula_basis="",
-        )
-
-    candidates_df = pd.DataFrame(candidates).sort_values(["Score", "Matched Peaks"], ascending=[False, False]).reset_index(drop=True)
-    matched_df = pd.DataFrame(matched_rows).sort_values(["Element", "Observed Energy (keV)"]).reset_index(drop=True)
-    top_elements = candidates_df["Element"].head(6).tolist()
-    top_elements_text = ", ".join(top_elements)
-    phase_summary = infer_eds_phase_summary(set(top_elements))
-    explanation = (
-        f"Top SEM/EDS element matches: {top_elements_text}. "
-        f"Matches are based on observed peak energies within ±{tolerance_kev:.3f} keV of the reference line energies. "
-        "Treat this as a first-pass chemistry aid rather than a final mineral identification."
-    )
-
-    element_proxy_table, oxide_table, cation_table, normalized_formula, oxide_summary, formula_basis, auto_formula_candidates, auto_formula_name, auto_formula_confidence = estimate_eds_oxide_chemistry(
-        candidates_df,
-        fe_mode=str(st.session_state.get("eds_fe_mode", "FeO")),
-        include_carbon=bool(st.session_state.get("eds_include_carbon_oxide", False)),
-    )
-
-    return EDSInterpretationResult(
-        candidate_elements=candidates_df,
-        observed_peaks=observed[["Observed Energy (keV)", "Observed Relative Intensity"]],
-        matched_peaks=matched_df,
-        top_elements_text=top_elements_text,
-        phase_summary=phase_summary,
-        explanation=explanation,
-        element_proxy_table=element_proxy_table,
-        oxide_table=oxide_table,
-        cation_table=cation_table,
-        normalized_formula=normalized_formula,
-        oxide_summary=oxide_summary,
-        formula_basis=formula_basis,
-        auto_formula_candidates=auto_formula_candidates,
-        auto_formula_name=auto_formula_name,
-        auto_formula_confidence=auto_formula_confidence,
-    )
-
-
 def format_peak_label(x_value: float, dataset_type: str) -> str:
-    if dataset_type == "XRD":
-        return f"{x_value:.2f}°"
-    if dataset_type == "GC":
-        return f"{x_value:.2f}"
-    if dataset_type == "SEM/EDS":
-        return f"{x_value:.2f} keV"
     return f"{x_value:.2f}"
-
-
-def summarize_confidence(score: float, matches: int) -> str:
-    if matches >= 4 and score >= 2.5:
-        return "high"
-    if matches >= 3 and score >= 1.5:
-        return "moderate"
-    return "low"
-
-
-def interpret_xrd(
-    peak_results: PeakResults | None,
-    wavelength: float,
-    tolerance_two_theta: float,
-    top_n_observed: int,
-    min_matches: int,
-    reference_df: pd.DataFrame,
-) -> XRDInterpretationResult:
-    empty_candidates = pd.DataFrame(columns=["Mineral", "Score", "Confidence", "Matched Peaks", "Observed Coverage", "Reference Coverage", "Matched 2θ"])
-    empty_obs = pd.DataFrame(columns=["Observed 2θ", "Observed d (Å)", "Observed Relative Intensity"])
-    empty_match = pd.DataFrame(columns=["Mineral", "Observed 2θ", "Reference 2θ", "Δ2θ", "Reference Relative Intensity"])
-
-    if peak_results is None or peak_results.table.empty:
-        return XRDInterpretationResult(empty_candidates, empty_obs, empty_match, None, "No peaks are available yet for XRD interpretation.")
-
-    observed = peak_results.table.copy()
-    observed = observed.sort_values("Intensity", ascending=False).head(int(max(top_n_observed, 1))).copy()
-    observed["Observed Relative Intensity"] = observed["Intensity"] / observed["Intensity"].max() * 100.0
-    observed["Observed 2θ"] = observed["X Position"]
-    observed["Observed d (Å)"] = xrd_d_spacing_from_two_theta(observed["Observed 2θ"].to_numpy(), wavelength)
-
-    candidates = []
-    matched_rows = []
-
-    for mineral, group in reference_df.groupby("mineral"):
-        ref = group.sort_values("relative_intensity", ascending=False).reset_index(drop=True)
-        used_ref_idx = set()
-        mineral_matches = []
-        score = 0.0
-
-        for _, obs_row in observed.iterrows():
-            candidates_for_obs = ref[np.abs(ref["two_theta"] - obs_row["Observed 2θ"]) <= tolerance_two_theta].copy()
-            if used_ref_idx:
-                candidates_for_obs = candidates_for_obs[~candidates_for_obs.index.isin(used_ref_idx)]
-
-            if candidates_for_obs.empty:
-                continue
-
-            candidates_for_obs["delta"] = np.abs(candidates_for_obs["two_theta"] - obs_row["Observed 2θ"])
-            best_ref = candidates_for_obs.sort_values(["delta", "relative_intensity"], ascending=[True, False]).iloc[0]
-            used_ref_idx.add(best_ref.name)
-
-            closeness = max(0.0, 1.0 - (best_ref["delta"] / tolerance_two_theta))
-            intensity_weight = (0.65 * (obs_row["Observed Relative Intensity"] / 100.0)) + (0.35 * (best_ref["relative_intensity"] / 100.0))
-            peak_score = closeness * intensity_weight
-            score += peak_score
-
-            mineral_matches.append({
-                "Mineral": mineral,
-                "Observed 2θ": obs_row["Observed 2θ"],
-                "Reference 2θ": best_ref["two_theta"],
-                "Δ2θ": best_ref["delta"],
-                "Reference Relative Intensity": best_ref["relative_intensity"],
-                "Reference X": best_ref["two_theta"],
-                "Reference Label": mineral,
-            })
-
-        match_count = len(mineral_matches)
-        if match_count < min_matches:
-            continue
-
-        observed_coverage = match_count / max(len(observed), 1)
-        reference_coverage = match_count / max(min(len(ref), len(observed)), 1)
-        matched_positions = ", ".join(f"{m['Observed 2θ']:.2f}" for m in sorted(mineral_matches, key=lambda x: x["Observed 2θ"]))
-        confidence = summarize_confidence(score, match_count)
-
-        candidates.append({
-            "Mineral": mineral,
-            "Score": round(score, 3),
-            "Confidence": confidence,
-            "Matched Peaks": match_count,
-            "Observed Coverage": round(observed_coverage, 2),
-            "Reference Coverage": round(reference_coverage, 2),
-            "Matched 2θ": matched_positions,
-        })
-        matched_rows.extend(mineral_matches)
-
-    if not candidates:
-        return XRDInterpretationResult(
-            empty_candidates,
-            observed[["Observed 2θ", "Observed d (Å)", "Observed Relative Intensity"]],
-            empty_match,
-            None,
-            "No mineral in the current reference library met the match threshold. Try lowering tolerance a little, adjusting peak settings, or uploading a better reference table.",
-        )
-
-    candidates_df = pd.DataFrame(candidates).sort_values(["Score", "Matched Peaks", "Observed Coverage"], ascending=[False, False, False]).reset_index(drop=True)
-    matched_df = pd.DataFrame(matched_rows)
-    top_candidate = candidates_df.iloc[0]["Mineral"]
-    top_match_subset = matched_df[matched_df["Mineral"] == top_candidate].sort_values("Observed 2θ")
-    top_candidate_row = candidates_df.iloc[0]
-    explanation = (
-        f"Top candidate: {top_candidate}. "
-        f"It matched {int(top_candidate_row['Matched Peaks'])} of the strongest observed peaks "
-        f"within ±{tolerance_two_theta:.2f}° 2θ. "
-        f"Matched peaks: {top_candidate_row['Matched 2θ']}. "
-        f"Treat this as an educational first-pass match, not a final phase identification."
-    )
-
-    return XRDInterpretationResult(
-        candidates=candidates_df,
-        observed_peaks=observed[["Observed 2θ", "Observed d (Å)", "Observed Relative Intensity"]],
-        matched_peaks=top_match_subset,
-        top_candidate=top_candidate,
-        explanation=explanation,
-    )
 
 
 # ------------------------------------------------------------
@@ -4120,7 +3077,7 @@ def make_signal_plot(
             ))
 
     if reference_lines is not None and not reference_lines.empty:
-        x_col = "Reference X" if "Reference X" in reference_lines.columns else "Reference 2θ"
+        x_col = "Reference X"
         label_col = "Reference Label" if "Reference Label" in reference_lines.columns else None
         y_top = float(np.nanmax(y)) if len(y) else 1.0
 
@@ -4140,10 +3097,6 @@ def make_signal_plot(
             )
 
         hover_label = "Reference position"
-        if dataset_type == "XRD":
-            hover_label = "Reference 2θ"
-        elif dataset_type == "SEM/EDS":
-            hover_label = "Reference energy"
 
         fig.add_trace(go.Scatter(
             x=reference_lines[x_col],
@@ -4205,7 +3158,7 @@ st.markdown(
     <div style="padding:0.8rem 1rem; border-radius:12px; background:#eef6ff; margin-bottom:0.8rem;">
         <h1 style="margin:0; font-size:2rem;">Spectrum Earth</h1>
         <p style="margin:0.3rem 0 0 0;">
-            Desktop signal-analysis console for topographic profiles, XRD, GC, SEM/EDS, and other x-y traces.
+            Landform and shape analysis for topographic profiles: valley transects, river long profiles and volcano radial profiles.
         </p>
     </div>
     """,
@@ -4221,35 +3174,17 @@ with control_1:
     st.markdown("**Load Data**")
     uploaded_file = st.file_uploader("Signal file", type=["csv", "txt", "xlsx"])
     sample_choice = st.selectbox("Or try a sample profile", ["None"] + list(SAMPLE_FILES), key="sample_choice",
-                                 help="Synthetic example profiles that ship with Spectrum Earth. Set the Dataset Type to match.")
+                                 on_change=on_sample_change,
+                                 help="Synthetic example profiles that ship with Spectrum Earth. Choosing one sets the matching Dataset Type.")
     dataset_type = st.selectbox(
         "Dataset Type",
-        [
-            "Generic Signal", "GC", "XRD", "SEM/EDS",
-            TOPO_TRANSECT, TOPO_LONG_PROFILE, TOPO_VOLCANO, "Other",
-        ],
+        [TOPO_TRANSECT, TOPO_LONG_PROFILE, TOPO_VOLCANO],
         key="dataset_type",
     )
     if st.button("Apply Preset", width="stretch"):
         apply_dataset_preset(dataset_type)
-    xrd_reference_upload = None
-    eds_reference_upload = None
     landform_reference_upload = None
-    if st.session_state.dataset_type == "XRD":
-        xrd_reference_upload = st.file_uploader(
-            "Custom XRD reference",
-            type=["csv", "txt", "xlsx"],
-            help="Columns: mineral plus either two_theta or d_spacing, and optional relative_intensity.",
-            key="xrd_reference_upload_widget",
-        )
-    elif st.session_state.dataset_type == "SEM/EDS":
-        eds_reference_upload = st.file_uploader(
-            "Custom SEM/EDS reference",
-            type=["csv", "txt", "xlsx"],
-            help="Columns: element, energy_kev, optional line, optional relative_weight.",
-            key="eds_reference_upload_widget",
-        )
-    elif st.session_state.dataset_type in TOPO_DATASET_TYPES:
+    if st.session_state.dataset_type in TOPO_DATASET_TYPES:
         landform_reference_upload = st.file_uploader(
             "Custom landform reference",
             type=["csv", "txt", "xlsx"],
@@ -4289,17 +3224,7 @@ with control_4:
     st.number_input("Peak Width", min_value=0.0, step=0.5, key="peak_width")
     st.checkbox("Show Peak Labels", key="show_peak_labels")
     st.number_input("Label Top N Peaks", min_value=1, max_value=30, step=1, key="label_top_n")
-    if st.session_state.dataset_type == "XRD":
-        st.number_input("XRD Wavelength (Å)", min_value=0.5, max_value=3.0, step=0.0001, key="xrd_wavelength", format="%.4f")
-        st.number_input("Match Tolerance (°2θ)", min_value=0.05, max_value=1.5, step=0.05, key="xrd_tolerance")
-        st.number_input("Top Peaks for Matching", min_value=3, max_value=20, step=1, key="xrd_top_n_peaks")
-        st.number_input("Minimum Matches", min_value=1, max_value=10, step=1, key="xrd_min_matches")
-    elif st.session_state.dataset_type == "SEM/EDS":
-        st.number_input("EDS Match Tolerance (keV)", min_value=0.01, max_value=0.5, step=0.01, key="eds_tolerance", format="%.3f")
-        st.number_input("Top Peaks for EDS Matching", min_value=3, max_value=20, step=1, key="eds_top_n_peaks")
-        st.selectbox("Fe Oxide Mode", ["FeO", "Fe2O3"], key="eds_fe_mode")
-        st.checkbox("Include C as CO2 in oxide mode", key="eds_include_carbon_oxide")
-    elif st.session_state.dataset_type in TOPO_DATASET_TYPES:
+    if st.session_state.dataset_type in TOPO_DATASET_TYPES:
         st.markdown("**Landform Analysis**")
         if st.session_state.dataset_type == TOPO_TRANSECT:
             st.selectbox(
@@ -4416,9 +3341,10 @@ if raw_df is None:
         <div style="padding:2.3rem 1rem; border:1px dashed #b8c7d9; border-radius:14px; text-align:center; background:#fafcff;">
             <h3 style="margin-top:0;">Load a signal file to begin</h3>
             <p style="max-width:850px; margin:0 auto;">
-                Spectrum Earth works best with simple x-y tables: distance and elevation for landform analysis, or XRD, GC and SEM/EDS traces.
+                Spectrum Earth works best with simple x-y tables: distance and elevation for valley transects, river long profiles and volcano radial profiles.
                 Once the file is loaded, the page will open into a full-width workspace with raw data, prepared signal,
-                labeled peaks, FFT view, comparison plots, and interpretation tools.
+                labeled peaks, FFT view, comparison plots, landform interpretation and the shape register.
+                For XRD, GC and SEM/EDS data, use TraceCode.
             </p>
         </div>
         """,
@@ -4470,8 +3396,7 @@ if temp_xy.empty:
     )
     if numeric_cols:
         st.info(f"Numeric-looking columns found: {', '.join(map(str, numeric_cols))}")
-    if st.session_state.dataset_type == "XRD":
-        st.caption("If you uploaded the sample reference table, that belongs in 'Custom XRD reference', not the main signal file uploader.")
+    st.caption("If you uploaded a landform reference table, that belongs in 'Custom landform reference', not the main signal file uploader.")
     st.stop()
 
 xmin = float(temp_xy["x"].min())
@@ -4541,12 +3466,8 @@ st.session_state.status_notes = list(dict.fromkeys(st.session_state.status_notes
 
 peak_results = None
 fft_results = None
-xrd_interpretation = None
-eds_interpretation = None
 st.session_state.peak_results = None
 st.session_state.fft_results = None
-st.session_state.xrd_interpretation = None
-st.session_state.eds_interpretation = None
 topo_interpretation = None
 topo_metrics = None
 landform_ref_table = None
@@ -4572,51 +3493,8 @@ except Exception as e:
     st.warning(f"FFT could not be computed: {e}")
 
 reference_source_label = "Built-in educational library"
-mineral_library_preview = None
 reference_preview = None
-if st.session_state.dataset_type == "XRD" and peak_results is not None:
-    try:
-        if xrd_reference_upload is not None:
-            ref_table = standardize_xrd_reference(load_reference_table(xrd_reference_upload), st.session_state.xrd_wavelength)
-            reference_source_label = "Custom uploaded library"
-        else:
-            ref_table = standardize_xrd_reference(builtin_xrd_reference_df(st.session_state.xrd_wavelength), st.session_state.xrd_wavelength)
-
-        reference_preview = ref_table.copy()
-        xrd_interpretation = interpret_xrd(
-            peak_results=peak_results,
-            wavelength=float(st.session_state.xrd_wavelength),
-            tolerance_two_theta=float(st.session_state.xrd_tolerance),
-            top_n_observed=int(st.session_state.xrd_top_n_peaks),
-            min_matches=int(st.session_state.xrd_min_matches),
-            reference_df=ref_table,
-        )
-        st.session_state.xrd_interpretation = xrd_interpretation
-    except Exception as e:
-        st.warning(f"XRD interpretation could not run: {e}")
-elif st.session_state.dataset_type == "SEM/EDS" and peak_results is not None:
-    try:
-        if eds_reference_upload is not None:
-            ref_table = standardize_eds_reference(load_eds_reference_table(eds_reference_upload))
-            reference_source_label = "Custom uploaded library"
-        else:
-            ref_table = standardize_eds_reference(builtin_eds_reference_df())
-
-        reference_preview = ref_table.copy()
-        try:
-            mineral_library_preview = tracecode_mineral_library_preview()
-        except Exception:
-            mineral_library_preview = None
-        eds_interpretation = interpret_eds(
-            peak_results=peak_results,
-            tolerance_kev=float(st.session_state.eds_tolerance),
-            top_n_observed=int(st.session_state.eds_top_n_peaks),
-            reference_df=ref_table,
-        )
-        st.session_state.eds_interpretation = eds_interpretation
-    except Exception as e:
-        st.warning(f"SEM/EDS interpretation could not run: {e}")
-elif st.session_state.dataset_type in TOPO_DATASET_TYPES and peak_results is not None:
+if st.session_state.dataset_type in TOPO_DATASET_TYPES and peak_results is not None:
     try:
         if landform_reference_upload is not None:
             landform_ref_table = standardize_landform_reference(load_reference_table(landform_reference_upload))
@@ -4776,11 +3654,6 @@ with tabs[2]:
     elif peak_results.table.empty:
         st.info("No peaks were found with the current settings. Try lowering prominence or distance.")
     else:
-        ref_lines = None
-        if xrd_interpretation is not None and not xrd_interpretation.matched_peaks.empty:
-            ref_lines = xrd_interpretation.matched_peaks
-        elif eds_interpretation is not None and not eds_interpretation.matched_peaks.empty:
-            ref_lines = eds_interpretation.matched_peaks
         fig_peaks = make_signal_plot(
             x,
             y,
@@ -4792,13 +3665,9 @@ with tabs[2]:
             peaks=peak_results,
             show_peak_labels=st.session_state.show_peak_labels,
             label_top_n=int(st.session_state.label_top_n),
-            reference_lines=ref_lines,
         )
         st.plotly_chart(fig_peaks, width="stretch")
-        peak_table = peak_results.table.copy()
-        if st.session_state.dataset_type == "XRD":
-            peak_table["d (Å)"] = xrd_d_spacing_from_two_theta(peak_table["X Position"].to_numpy(), st.session_state.xrd_wavelength)
-        st.dataframe(peak_table, width="stretch")
+        st.dataframe(peak_results.table, width="stretch")
 
 
 with tabs[3]:
@@ -4917,106 +3786,7 @@ with tabs[4]:
     st.dataframe(compare_df.head(20), width="stretch")
 
 with tabs[5]:
-    if st.session_state.dataset_type == "XRD":
-        if xrd_interpretation is None:
-            st.info("XRD interpretation is not available yet for this run.")
-        else:
-            st.markdown(f"**Reference source:** {reference_source_label}")
-            st.markdown(
-                "This first-pass matcher compares your strongest observed peaks to a small mineral reference table. "
-                "It is useful for educational screening and narrowing candidates, not for final phase identification."
-            )
-            if xrd_interpretation.candidates.empty:
-                st.warning(xrd_interpretation.explanation)
-            else:
-                top_candidate = xrd_interpretation.top_candidate
-                st.success(xrd_interpretation.explanation)
-                left_i, right_i = st.columns([1.3, 1.0], gap="large")
-                with left_i:
-                    st.markdown("**Ranked candidates**")
-                    st.dataframe(xrd_interpretation.candidates, width="stretch")
-                with right_i:
-                    st.markdown("**Observed peaks used for matching**")
-                    st.dataframe(xrd_interpretation.observed_peaks, width="stretch")
-
-                if not xrd_interpretation.matched_peaks.empty:
-                    st.markdown(f"**Matched peaks for {top_candidate}**")
-                    st.dataframe(xrd_interpretation.matched_peaks, width="stretch")
-
-                if reference_preview is not None:
-                    with st.expander("Line-energy library preview"):
-                        st.dataframe(reference_preview.head(50), width="stretch")
-                if mineral_library_preview is not None:
-                    with st.expander("Mineral formula library preview"):
-                        st.dataframe(mineral_library_preview.head(100), width="stretch")
-    elif st.session_state.dataset_type == "SEM/EDS":
-        if eds_interpretation is None:
-            st.info("SEM/EDS interpretation is not available yet for this run.")
-        else:
-            st.markdown(f"**Reference source:** {reference_source_label}")
-            st.markdown("**Mineral formula source:** TraceCode local SQLite mineral library")
-            st.markdown(
-                "This first-pass matcher compares your strongest observed energy peaks to an elemental line table, then scores the oxide-normalized chemistry against a local mineral formula library. "
-                "It is useful for rapid chemistry screening and narrowing possibilities, not for a final phase identification."
-            )
-            if eds_interpretation.candidate_elements.empty:
-                st.warning(eds_interpretation.explanation)
-            else:
-                st.success(eds_interpretation.explanation)
-                st.markdown(f"**Likely matched elements:** {eds_interpretation.top_elements_text}")
-                st.info(eds_interpretation.phase_summary)
-                left_i, right_i = st.columns([1.25, 1.0], gap="large")
-                with left_i:
-                    st.markdown("**Ranked element matches**")
-                    st.dataframe(eds_interpretation.candidate_elements, width="stretch")
-                with right_i:
-                    st.markdown("**Observed peaks used for matching**")
-                    st.dataframe(eds_interpretation.observed_peaks, width="stretch")
-
-                if not eds_interpretation.matched_peaks.empty:
-                    st.markdown("**Matched line energies**")
-                    st.dataframe(eds_interpretation.matched_peaks, width="stretch")
-
-                st.markdown("**Oxide / formula mode**")
-                st.caption(
-                    "This mode converts the matched SEM/EDS elements into a stoichiometric oxide model. "
-                    "Oxygen is inferred from oxide stoichiometry, and the chemistry is normalized to a simple cation basis. "
-                    "Treat it as a first-pass geological chemistry aid rather than a quantitative microprobe result."
-                )
-                if not eds_interpretation.oxide_table.empty:
-                    if eds_interpretation.normalized_formula:
-                        if eds_interpretation.auto_formula_name:
-                            st.success(f"Best auto-normalized formula: {eds_interpretation.normalized_formula}  |  Candidate: {eds_interpretation.auto_formula_name} ({eds_interpretation.auto_formula_confidence} confidence)")
-                        else:
-                            st.success(f"Normalized formula: {eds_interpretation.normalized_formula}")
-                    if eds_interpretation.formula_basis:
-                        st.caption(eds_interpretation.formula_basis)
-                    st.info(eds_interpretation.oxide_summary)
-
-                    if not eds_interpretation.auto_formula_candidates.empty:
-                        st.markdown("**Auto oxygen-basis candidates**")
-                        st.dataframe(eds_interpretation.auto_formula_candidates.head(10), width="stretch")
-
-                    oxide_left, oxide_mid, oxide_right = st.columns([1.0, 1.1, 1.0], gap="large")
-                    with oxide_left:
-                        st.markdown("**Element proxy table**")
-                        st.dataframe(eds_interpretation.element_proxy_table, width="stretch")
-                    with oxide_mid:
-                        st.markdown("**Estimated oxide table**")
-                        st.dataframe(eds_interpretation.oxide_table, width="stretch")
-                    with oxide_right:
-                        st.markdown("**Normalized cation table**")
-                        st.dataframe(eds_interpretation.cation_table, width="stretch")
-                else:
-                    st.warning("No oxide/formula model could be built from the current SEM/EDS element matches.")
-
-                if reference_preview is not None:
-                    with st.expander("Line-energy library preview"):
-                        st.dataframe(reference_preview.head(50), width="stretch")
-                if mineral_library_preview is not None:
-                    with st.expander("Mineral formula library preview"):
-                        st.dataframe(mineral_library_preview.head(100), width="stretch")
-    elif st.session_state.dataset_type in TOPO_DATASET_TYPES:
+    if st.session_state.dataset_type in TOPO_DATASET_TYPES:
         if topo_interpretation is None:
             st.info("Landform interpretation is not available yet for this run.")
         else:
@@ -5074,7 +3844,7 @@ with tabs[5]:
                     )
 
     else:
-        st.info("Interpretation is currently built for XRD, SEM/EDS and topographic profiles. GC candidate lookup can come next.")
+        st.info("Choose a landform Dataset Type to see the interpretation.")
 
 
     st.markdown("---")
@@ -5089,7 +3859,7 @@ with tabs[5]:
             provider_bits.append("Ollama Cloud ready")
         st.caption(" | ".join(provider_bits) if provider_bits else "No AI model is set up right now, so you will get a built-in summary instead.")
         ai_question = st.text_area("AI request", key="ai_question", placeholder="Example: Summarize the most likely interpretation and what I should check next.")
-        if st.button("Generate AI summary", width="stretch", disabled=not ai_warranted(st.session_state.dataset_type, xrd_interpretation, eds_interpretation, peak_results)):
+        if st.button("Generate AI summary", width="stretch", disabled=not ai_warranted(st.session_state.dataset_type, peak_results)):
             try:
                 ai_text, provider = generate_ai_summary(
                     dataset_type=st.session_state.dataset_type,
@@ -5097,8 +3867,6 @@ with tabs[5]:
                     y_label=st.session_state.y_label,
                     peak_results=peak_results,
                     fft_results=fft_results,
-                    xrd_interpretation=xrd_interpretation,
-                    eds_interpretation=eds_interpretation,
                     notes=st.session_state.status_notes,
                     topo_interpretation=topo_interpretation,
                     question=ai_question,
@@ -5139,16 +3907,6 @@ with tabs[6]:
                 except (TypeError, ValueError):
                     _val = str(_mrow["Value"])
                 report_lines.append(f"{_mrow['Metric']}: {_val} ({_mrow['Used in score']})")
-
-    if xrd_interpretation is not None and xrd_interpretation.top_candidate is not None:
-        report_lines.append(f"Top XRD Candidate: {xrd_interpretation.top_candidate}")
-    if eds_interpretation is not None and eds_interpretation.top_elements_text:
-        report_lines.append(f"Top SEM/EDS Elements: {eds_interpretation.top_elements_text}")
-    if eds_interpretation is not None and eds_interpretation.normalized_formula:
-        report_lines.append(f"SEM/EDS Oxide Formula: {eds_interpretation.normalized_formula}")
-    if eds_interpretation is not None and eds_interpretation.auto_formula_name:
-        report_lines.append(f"SEM/EDS Auto Formula Candidate: {eds_interpretation.auto_formula_name} ({eds_interpretation.auto_formula_confidence})")
-        report_lines.append("SEM/EDS Mineral Library: TraceCode local SQLite reference")
 
     st.markdown("\n".join([f"- {line}" for line in report_lines]))
 

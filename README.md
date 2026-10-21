@@ -1,8 +1,10 @@
 # Spectrum Earth
 
-Signal analysis for Earth science data, by Dougalien Systems: XRD, SEM/EDS, GC, FFT, and topographic profiles (valley transects, river long profiles, and volcano radial profiles).
+Landform and shape analysis by Dougalien Systems: measure topographic profiles (valley transects, river long profiles and volcano radial profiles), compare them with ideal shapes, and screen them against published landform classes. Peaks and FFT views are included for the profiles.
 
-Load your own x-y file, or pick one of the sample profiles in `samples/` from the "Or try a sample profile" menu.
+XRD, GC and SEM/EDS analysis now lives in TraceCode.
+
+Load your own x-y file, or pick one of the sample profiles in `samples/` from the "Or try a sample profile" menu (choosing one sets the matching Dataset Type).
 
 ## Run it on your own computer
 

@@ -111,18 +111,46 @@ def test_asymmetry_is_kept_not_averaged():
     assert left / right == pytest.approx(1.0 / 3.0, rel=0.10)
 
 
-def test_each_half_is_fitted_down_to_its_own_foot():
+def test_a_volcano_on_a_regional_slope_is_read_to_its_own_foot():
+    # A straight cone on ground that keeps falling to the right. Each side
+    # running to its own base sent the right foot out to the end of the line.
+    x = np.linspace(-3000.0, 6000.0, 1801)
+    z = 200.0 * np.clip(1.0 - np.abs(x) / 1000.0, 0.0, None) - 0.02 * x
+    item = I.measure(x, z, I.HILL)
+    assert item["ok"], item["problem"]
+    assert -1100.0 < item["m"]["x_left"] < -800.0
+    assert 700.0 < item["m"]["x_right"] < 1100.0
+    assert item["departure"] < 0.02
+
+
+def test_a_valley_with_unequal_rims_is_read_to_the_lower_rim():
     # A U-shaped valley whose right rim is 40% lower than its left.
     x, z = two_sided(lambda u: I.parabola_curve(u, -1.0), kind=I.VALLEY, right_height=120.0)
     item = I.measure(x, z, I.VALLEY)
     assert item["ok"], item["problem"]
-    heights = {h["side"]: h["height"] for h in item["halves"]}
-    assert heights["L"] == pytest.approx(200.0, rel=0.03)
-    assert heights["R"] == pytest.approx(120.0, rel=0.03)
-    assert item["family"] == "parabola"
-    for v in params(item).values():
+    for h in item["halves"]:
+        assert h["height"] == pytest.approx(120.0, rel=0.03)
+    # Cut at the lower rim, each wall is still a U-shaped parabola.
+    for v in params(item, "parabola").values():
         assert v == pytest.approx(-1.0, abs=0.05)
+    assert item["comparisons"]["parabola"]["departure"] < 0.01
     assert item["departure"] < 0.01
+
+
+@pytest.mark.parametrize("a", [3.0, 5.0, 8.0])
+@pytest.mark.parametrize("kind", [I.HILL, I.SLOPE])
+def test_a_graded_profile_is_fitted_with_the_exponential(a, kind):
+    if kind == I.SLOPE:
+        x = np.linspace(0.0, 20000.0, 2001)
+        z = 1500.0 * I.exponential_curve(x / 20000.0, a)
+    else:
+        x, z = two_sided(lambda u: I.exponential_curve(u, a))
+    item = I.measure(x, z, kind)
+    assert item["ok"], item["problem"]
+    assert item["family"] == "exponential"
+    for v in params(item).values():
+        assert v == pytest.approx(a, rel=0.05)
+    assert item["departure"] < 0.005
 
 
 def test_flat_floor_is_measured_and_the_walls_fitted_beyond_it():

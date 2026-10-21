@@ -3219,9 +3219,9 @@ with control_ideal:
         st.checkbox("Crop X Range", key="crop_enabled",
                     help="Trim the profile to one feature before fitting.")
     st.caption(
-        "Each half of the profile is pinned at the apex and its own foot and fitted with the best "
-        "parabola, true circle and superellipse. The curve that fits best is the ideal, and the "
-        "extra and missing rock against it is the departure."
+        "Each half of the profile is pinned at the apex and the foot and fitted with the best "
+        "parabola, exponential, true circle and superellipse. The curve that fits best is the "
+        "ideal, and the extra and missing rock against it is the departure."
     )
 
 with st.expander("Settings for the other analyses (axes, smoothing, peaks, FFT, landform screening, AI)"):

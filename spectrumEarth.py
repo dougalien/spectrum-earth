@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
+import dougalien_brand as brand
+
 import ai_client
 from scipy import sparse
 from scipy.fft import rfft, rfftfreq
@@ -21,9 +23,10 @@ from scipy.sparse.linalg import spsolve
 
 st.set_page_config(
     page_title="Spectrum Earth",
-    page_icon="⛰️",
+    page_icon=brand.page_icon("⛰️"),
     layout="wide",
 )
+brand.apply_branding()
 
 
 DATASET_PRESETS = {}
@@ -3155,7 +3158,7 @@ init_state()
 
 st.markdown(
     """
-    <div style="padding:0.8rem 1rem; border-radius:12px; background:#eef6ff; margin-bottom:0.8rem;">
+    <div style="padding:0.8rem 1rem; border-radius:6px; background:#FFFFFF; border:1px solid #D6DBDA; border-left:4px solid #B4532A; margin-bottom:0.8rem;">
         <h1 style="margin:0; font-size:2rem;">Spectrum Earth</h1>
         <p style="margin:0.3rem 0 0 0;">
             Landform and shape analysis for topographic profiles: valley transects, river long profiles and volcano radial profiles.
@@ -3338,7 +3341,7 @@ raw_df = st.session_state.raw_df
 if raw_df is None:
     st.markdown(
         """
-        <div style="padding:2.3rem 1rem; border:1px dashed #b8c7d9; border-radius:14px; text-align:center; background:#fafcff;">
+        <div style="padding:2.3rem 1rem; border:1px dashed #D6B27C; border-radius:6px; text-align:center; background:#FFFFFF;">
             <h3 style="margin-top:0;">Load a signal file to begin</h3>
             <p style="max-width:850px; margin:0 auto;">
                 Spectrum Earth works best with simple x-y tables: distance and elevation for valley transects, river long profiles and volcano radial profiles.

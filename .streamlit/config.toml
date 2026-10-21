@@ -1,0 +1,8 @@
+[theme]
+# Dougalien Systems palette (logo sand, slate and rust), matching dougalien.com
+base = "light"
+primaryColor = "#3E5C6B"
+backgroundColor = "#F4F4F1"
+secondaryBackgroundColor = "#EFE8DA"
+textColor = "#1B1E20"
+font = "sans serif"

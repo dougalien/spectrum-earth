@@ -84,6 +84,13 @@ PROCESSING = {
     # High ground is also one apex when the dip between the pieces is shallower
     # than this fraction of the relief.
     "saddle_depth": 0.15,
+    # A summit split by a depression: a second crest within summit_merge of the
+    # summit is the other rim when it stands at least rim_rise of the height
+    # above the foot and the depression between drops at least rim_dip of the
+    # height below it (Crater Lake, Newberry). 0.8 keeps a flank shoulder
+    # lower down (Piton de la Fournaise at 0.69) part of the flank.
+    "rim_rise": 0.8,
+    "rim_dip": 0.10,
     # The shorter half must be at least this share of the longer, or the line
     # does not cross the feature.
     "min_side_ratio": 0.10,
@@ -92,11 +99,14 @@ PROCESSING = {
 }
 
 VOCAB = {
-    HILL: {"feature": "hill", "apex": "summit", "flat": "flat top", "side": "flank",
+    HILL: {"feature": "hill", "apex": "summit", "flat": "flat top", "split": "summit depression",
+           "side": "flank",
            "sides": "flanks", "foot": "foot", "zones": ("summit", "mid-flank", "foot")},
-    VALLEY: {"feature": "valley", "apex": "valley floor", "flat": "flat floor", "side": "wall",
+    VALLEY: {"feature": "valley", "apex": "valley floor", "flat": "flat floor", "split": "raised floor",
+             "side": "wall",
              "sides": "walls", "foot": "rim", "zones": ("floor", "mid-wall", "rim")},
-    SLOPE: {"feature": "profile", "apex": "head", "flat": "flat head", "side": "slope",
+    SLOPE: {"feature": "profile", "apex": "head", "flat": "flat head", "split": "split head",
+            "side": "slope",
             "sides": "slope", "foot": "mouth", "zones": ("head", "middle", "mouth")},
 }
 
@@ -223,8 +233,36 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
             f"{w['sides']} still stand."
         )
 
+    # A summit split by a depression (a caldera whose rims stand at different
+    # heights, a rift valley between rift mountains): a second crest within
+    # merge_gap of the summit, standing high and enclosing a depression, is the
+    # other rim. The apex is then the middle of the depression, and each half
+    # is read out from its own rim.
+    split = None
+    if merge_gap > 0:
+        for step in (-1, 1):
+            edge = lo_s if step < 0 else hi_s
+            peaks, _ = find_peaks(z)
+            # Rims inside the summit run (a caldera within a flat top) or within
+            # merge_gap beyond its edge.
+            reach = abs(x[edge] - x[t]) + merge_gap
+            idx = peaks[(np.sign(x[peaks] - x[t]) == step) & (np.abs(x[peaks] - x[t]) <= reach)]
+            for k in idx:
+                a, b = sorted((t, int(k)))
+                floor = float(z[a:b + 1].min())
+                if (z[k] >= z_base + PROCESSING["rim_rise"] * height
+                        and z[k] - floor >= PROCESSING["rim_dip"] * height
+                        and (split is None or z[k] > z[split])):
+                    split = int(k)
+    k_left, k_right = t, t
+    if split is not None:
+        k_left, k_right = sorted((t, split))
+        inner = z[k_left:k_right + 1]
+        low = np.flatnonzero(inner <= inner.min() + PROCESSING["apex_level"] * height) + k_left
+        t = int(round(0.5 * (low[0] + low[-1])))
+
     def crossing(direction: int, zb: float):
-        i = t
+        i = k_left if direction < 0 else k_right
         while 0 <= i < len(z):
             if z[i] <= zb:
                 break
@@ -255,6 +293,11 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
                          shallow=z_top - PROCESSING["saddle_depth"] * height)
     plateau = (float(xs[kr]) - float(xs[kl])) / width if kr > kl else 0.0
     x_flat_l, x_flat_r = (float(xs[kl]), float(xs[kr])) if kr > kl else (x_apex, x_apex)
+    if split is not None:
+        x_flat_l, x_flat_r = float(x[k_left]), float(x[k_right])
+        plateau = (x_flat_r - x_flat_l) / width
+        kl = int(np.argmin(np.abs(xs - x_flat_l)))
+        kr = int(np.argmin(np.abs(xs - x_flat_r)))
 
     pk, _ = find_peaks(zs, prominence=0.05 * height)
     far = [k for k in pk if (xs[k] < xs[kl] or xs[k] > xs[kr]) and zs[k] >= z_base + 0.85 * height]
@@ -290,6 +333,7 @@ def _measure_apex(x: np.ndarray, z: np.ndarray, kind: str, merge_gap: float = 0.
         "x_apex": x_apex,
         "x_flat_left": min(x_flat_l, x_apex),
         "x_flat_right": max(x_flat_r, x_apex),
+        "split": split is not None,
     }, notes
 
 
@@ -342,7 +386,13 @@ def half_profiles(x, z, m: dict, kind: str = HILL) -> list:
     for side, radius, sign, base in (("L", xa - m["x_left"], -1.0, m["base_left"]),
                                      ("R", m["x_right"] - xa, 1.0, m["base_right"])):
         zz = np.interp(xa + sign * U * radius, xc, zc)
-        height = m["apex_elev"] - base
+        # Each half is pinned at its own crest: the highest ground between the
+        # apex and that side's edge of a flat top (a caldera rim, a rift
+        # mountain), so one side is never held to the other side's height.
+        edge = m.get("x_flat_left" if side == "L" else "x_flat_right", xa)
+        on_top = (xc >= min(xa, edge)) & (xc <= max(xa, edge))
+        top = float(zc[on_top].max()) if abs(edge - xa) > 0 and on_top.any() else m["apex_elev"]
+        height = top - base
         out.append({"side": side, "radius": float(radius), "sign": sign, "base": float(base),
                     "height": float(height), "g": np.clip((zz - base) / height, 0.0, None)})
     return out
@@ -404,7 +454,8 @@ def analyse_slope(x, z) -> tuple[dict, list, list]:
 #
 #   1. Locate the apex and each foot (analyse_profile / analyse_slope). Both
 #      feet sit at one level, the higher of the two sides' bases.
-#   2. Normalise each half onto its own width and its own height.
+#   2. Normalise each half onto its own width and its own height, from its
+#      own crest (the highest ground on its side of a flat top) to the foot.
 #   3. Fit each of the four ideal families to each half. Every family has ONE
 #      free shape control, so they compete on equal terms:
 #        parabola      g = (1 - u)(1 - k u),  -1 <= k <= 1
@@ -414,8 +465,9 @@ def analyse_slope(x, z) -> tuple[dict, list, list]:
 #        superellipse  g = (1 - u^e)^(1/e)
 #      The best member is the one leaving the least rock out of place
 #      (minimum departure), found by a fine grid then a bounded refinement.
-#   4. The family with the smallest total departure over both halves is the
-#      ideal. On a tie (within 0.1% of the height) the order above wins.
+#   4. On each half on its own, the family with the smallest departure is that
+#      half's ideal, so the two halves of a lopsided feature can differ. On a
+#      tie (within 0.1% of the height) the order above wins.
 #   5. Departure, extra and missing rock are measured against that ideal.
 #
 # All four families contain the straight line (k = 0, a = 0, zero bulge, e = 1), so a
@@ -527,6 +579,7 @@ FAMILIES = {
     },
 }
 STRAIGHT = "straight"
+BEST = "best"   # each half's own best family
 TIE = 0.001
 
 
@@ -745,14 +798,28 @@ def has_flat_apex(item: dict) -> bool:
     return item["m"]["plateau"] >= 0.10 and bool(cuts) and float(np.median(cuts)) >= 0.04
 
 
-def fit_words(item: dict) -> str:
-    """The fitted ideal and its control on each half, e.g. 'parabola, k = +0.61 / +0.58'."""
-    fam = item["family"]
+def half_words(fam: str, value: float) -> str:
+    """One half's ideal, e.g. 'parabola k = +0.61'."""
     spec = FAMILIES[fam]
-    vals = item["comparisons"][fam]["params"]
     fmt = "{:+.2f}" if fam != "superellipse" else "{:.2f}"
-    parts = " / ".join(fmt.format(vals[h["side"]]) for h in item["halves"])
-    return f"{spec['name'].lower()}, {spec['param']} = {parts}"
+    return f"{spec['name'].split(' (')[0].lower()} {spec['param']} = {fmt.format(value)}"
+
+
+def fit_words(item: dict, key: str | None = None) -> str:
+    """The fitted ideal on each half: 'parabola, k = +0.61 / +0.58' when both halves
+    take the same family, 'exponential a = +1.89 / superellipse e = 0.63' when not."""
+    key = key or item["family"]
+    c = item["comparisons"][key]
+    sides = [h["side"] for h in item["halves"]]
+    fams = c.get("fams") or {s: key for s in sides}
+    vals = c["params"]
+    if len(set(fams.values())) == 1:
+        fam = fams[sides[0]]
+        spec = FAMILIES[fam]
+        fmt = "{:+.2f}" if fam != "superellipse" else "{:.2f}"
+        parts = " / ".join(fmt.format(vals[s]) for s in sides)
+        return f"{spec['name'].lower()}, {spec['param']} = {parts}"
+    return " / ".join(half_words(fams[s], vals[s]) for s in sides)
 
 
 def measure(x, z, kind: str = HILL, ridge_axis: float | None = None, crest: str = "flat") -> dict:
@@ -808,13 +875,15 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None, crest: str 
     smooth_by_side = {h["side"]: fit_smooth(h) for h in halves} if kind != SLOPE else {}
     flat = kind != SLOPE and has_flat_apex({"m": m, "smooth_by_side": smooth_by_side})
     if ridge_axis is not None:
-        # The crest of a ridge is measured from its rift mountains: level
-        # between them, or pinned at the axis.
-        flat = crest == "flat" and m["plateau"] > 0.0
+        m["split"] = crest == "flat" and m["plateau"] > 0.0
+    if m.get("split"):
+        # A split summit is level from the middle of the depression out to each
+        # rim, at that rim's own height; the walls are fitted beyond the rims.
+        flat = True
         for h in halves:
             edge = (m["x_apex"] - m["x_flat_left"]) if h["side"] == "L" else (m["x_flat_right"] - m["x_apex"])
             h["flat_u"] = float(np.clip(edge / h["radius"], 0.0, 0.9)) if flat and h["radius"] > 0 else 0.0
-    for h in halves if ridge_axis is None else []:
+    for h in halves if not m.get("split") else []:
         edge = {"L": m["x_apex"] - m.get("x_flat_left", m["x_apex"]),
                 "R": m.get("x_flat_right", m["x_apex"]) - m["x_apex"]}.get(h["side"], 0.0)
         if not flat or h["radius"] <= 0:
@@ -840,11 +909,17 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None, crest: str 
     straight = {h["side"]: with_flat(parabola_curve(U, 0.0), h["flat_u"]) for h in halves}
     comparisons[STRAIGHT] = {"ideal": straight, "params": {}, **compare(halves, straight, kind)}
 
-    # Step 4: the family that leaves the least rock out of place, ties to the
-    # earlier family in the fixed order.
+    # Step 4: on each half on its own, the family that leaves the least rock out
+    # of place, ties to the earlier family in the fixed order. The two halves
+    # of a lopsided feature may take different families.
     fams = [f for f in FAMILIES if f in comparisons]
-    best_d = min(comparisons[f]["departure"] for f in fams)
-    family = next(f for f in fams if comparisons[f]["departure"] <= best_d + TIE)
+    pick = {}
+    for h in halves:
+        d = {f: _half_departure(h, comparisons[f]["ideal"][h["side"]]) for f in fams}
+        pick[h["side"]] = next(f for f in fams if d[f] <= min(d.values()) + TIE)
+    best = {k: {s: comparisons[f][k][s] for s, f in pick.items()} for k in ("ideal", "params", "wall")}
+    comparisons[BEST] = {**best, "fams": pick, **compare(halves, best["ideal"], kind)}
+    family = BEST
 
     # The name follows the wall's own form, so a flat floor does not make a V read as a U.
     ideal_full = {h["side"]: fullness(comparisons[family]["wall"][h["side"]]) for h in halves}
@@ -867,7 +942,7 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None, crest: str 
     item["grade"] = departure_class(item["departure"])
     name = PERFECT_SHAPES[item["landmark"]]["names"][kind]
     if flat:
-        name += f" with a {VOCAB[kind]['flat']}"
+        name += f" with a {VOCAB[kind]['split' if m.get('split') else 'flat']}"
     item["name"] = name
     item["flat"] = flat
     if m["width_height"] < 1.0 or m["width_height"] > 200.0:
@@ -900,6 +975,8 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
             row[f"Departure, best {spec['name'].lower()}"] = c[fam]["departure"]
             for side, v in c[fam]["params"].items():
                 row[f"{spec['name']} {spec['param']} ({side})"] = v
+    for side, f in c[BEST]["fams"].items():
+        row[f"Ideal ({side})"] = half_words(f, c[BEST]["params"][side])
     for side, d in item["by_side"].items():
         row[f"Fullness ({side})"] = d["fullness"]
         row[f"Departure ({side})"] = d["departure"]
@@ -1079,7 +1156,7 @@ def read_ridge(x, z, axis: float | None = None) -> dict:
     if whole.get("ok"):
         if lo:
             split = whole["m"]["x_flat_right"] - whole["m"]["x_flat_left"]
-            whole["name"] = whole["name"].replace(f" with a {VOCAB[HILL]['flat']}", "") + " split by a rift valley"
+            whole["name"] = whole["name"].replace(f" with a {VOCAB[HILL]['split']}", "") + " split by a rift valley"
     cool = float("nan")
     if whole.get("ok"):
         g = cooling_curve(U)

@@ -15,6 +15,11 @@ sys.path.insert(0, str(ROOT))
 import ideal_shape as I  # noqa: E402
 
 
+def families(item):
+    """The families the halves took, each half choosing its own."""
+    return set(item["comparisons"][I.BEST]["fams"].values())
+
+
 def two_sided(g_fn, half_width=1000.0, height=200.0, left_share=0.5, n=1201, kind=I.HILL,
               right_height=None):
     """A profile built from a half-profile shape, with flat ground beyond both feet.
@@ -43,7 +48,7 @@ def test_a_parabola_is_fitted_with_a_parabola(k, kind):
     x, z = two_sided(lambda u: I.parabola_curve(u, k), kind=kind)
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
-    assert item["family"] == "parabola"
+    assert families(item) == {"parabola"}
     for v in params(item).values():
         assert v == pytest.approx(k, abs=0.03)
     assert item["departure"] < 0.005
@@ -64,7 +69,7 @@ def test_shapes_beyond_any_parabola_go_to_the_superellipse(e, kind):
     x, z = two_sided(lambda u: I.ideal_curve(u, e), kind=kind)
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
-    assert item["family"] == "superellipse"
+    assert families(item) == {"superellipse"}
     for v in params(item).values():
         assert v == pytest.approx(e, rel=0.05)
     assert item["departure"] < 0.01
@@ -76,7 +81,7 @@ def test_a_true_circular_arc_is_fitted_with_the_circle(height, bulge):
     x, z = two_sided(lambda u: I.circle_curve(u, bulge, a), height=height)
     item = I.measure(x, z, I.HILL)
     assert item["ok"], item["problem"]
-    assert item["family"] == "circle"
+    assert families(item) == {"circle"}
     for v in params(item).values():
         assert v == pytest.approx(bulge, abs=0.01)
     assert item["departure"] < 0.005
@@ -94,7 +99,7 @@ def test_circle_passes_through_apex_and_foot_and_refuses_overhangs():
 
 def test_a_straight_cone_stays_straight():
     item = I.measure(*two_sided(lambda u: 1.0 - u), I.HILL)
-    assert item["family"] == "parabola"           # the tie goes to the parabola
+    assert families(item) == {"parabola"}           # the tie goes to the parabola
     for v in params(item).values():
         assert abs(v) < 0.03
     assert item["landmark"] == "straight"
@@ -147,7 +152,7 @@ def test_a_graded_profile_is_fitted_with_the_exponential(a, kind):
         x, z = two_sided(lambda u: I.exponential_curve(u, a))
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
-    assert item["family"] == "exponential"
+    assert families(item) == {"exponential"}
     for v in params(item).values():
         assert v == pytest.approx(a, rel=0.05)
     assert item["departure"] < 0.005
@@ -160,7 +165,7 @@ def test_flat_floor_is_measured_and_the_walls_fitted_beyond_it():
     assert item["ok"]
     assert item["flat"]
     assert item["name"] == "V-shaped with a flat floor"
-    assert item["family"] == "parabola"
+    assert families(item) == {"parabola"}
     for v in params(item).values():
         assert abs(v) < 0.1                      # the walls are straight
     assert item["departure"] < 0.02
@@ -187,7 +192,7 @@ def test_long_profile_is_one_half_and_direction_does_not_matter():
     down = I.measure(x, z, I.SLOPE)
     up = I.measure(x, z[::-1], I.SLOPE)
     assert down["ok"] and up["ok"]
-    assert down["family"] == up["family"] == "parabola"
+    assert families(down) == families(up) == {"parabola"}
     assert down["landmark"] == up["landmark"] == "concave"
     assert down["departure"] == pytest.approx(up["departure"], abs=1e-6)
 
@@ -253,3 +258,39 @@ def test_a_peaked_axial_high_reads_fast_and_a_pure_cooling_ridge_fits_the_coolin
     x, z = _cooling_ridge(lambda r: 300.0 * np.exp(-r / 4000))
     r = I.read_ridge(x, z)
     assert r["axis_type"] == "axial high" and r["rate_class"] == "fast"
+
+
+def test_each_half_takes_its_own_family():
+    """A dome on one side and a graded concave flank on the other are not forced into one shape."""
+    x = np.linspace(-1500.0, 1500.0, 1801)
+    u = np.clip(np.abs(x) / 1000.0, 0.0, 1.0)
+    a = 5.0
+    g = np.where(x < 0, I.parabola_curve(u, -1.0), (np.exp(-a * u) - np.exp(-a)) / (1 - np.exp(-a)))
+    item = I.measure(x, 200.0 * g, I.HILL)
+    assert item["comparisons"][I.BEST]["fams"] == {"L": "parabola", "R": "exponential"}
+    # Each half on its own does at least as well as any one family on both.
+    assert all(item["departure"] <= item["comparisons"][f]["departure"] + 1e-9 for f in I.FAMILIES)
+
+
+def test_each_half_is_pinned_at_its_own_crest():
+    """A ridge whose rift mountains stand at different heights: each flank from its own crest."""
+    x = np.arange(-200_000.0, 200_001.0, 500.0)
+    r = np.abs(x)
+    crest = np.where(x < 0, 1200.0, 800.0)
+    z = -2500.0 - 6.0 * np.sqrt(r) + crest * np.exp(-((r - 20_000) / 7000) ** 2) - 1800.0 * np.clip(1 - r / 12_000, 0, 1)
+    rd = I.read_ridge(x, z)
+    assert rd["axis_type"] == "axial valley"
+    left, right = rd["whole"]["halves"]
+    assert left["height"] - right["height"] > 300.0
+
+
+def test_a_caldera_is_read_from_its_middle_and_each_rim():
+    """Crater Lake: rims at different heights round the lake, each flank from its own rim."""
+    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_craterlake_caldera.csv")
+    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
+    m = item["m"]
+    assert m["split"] and m["x_flat_left"] < m["x_apex"] < m["x_flat_right"]
+    assert m["x_flat_right"] - m["x_flat_left"] > 8000.0
+    left, right = item["halves"]
+    assert left["height"] != right["height"]
+    assert all(h["flat_u"] > 0 for h in item["halves"])

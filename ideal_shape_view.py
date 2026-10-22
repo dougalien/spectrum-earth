@@ -53,18 +53,24 @@ CHART_Y = {
 }
 
 SHAPE_ORDER = list(ideal.PERFECT_SHAPES)
-CHOICE_KEYS = list(ideal.FAMILIES) + [ideal.STRAIGHT]
+CHOICE_KEYS = [ideal.BEST] + list(ideal.FAMILIES) + [ideal.STRAIGHT]
 
 
 def choice_label(key: str) -> str:
     if key == ideal.STRAIGHT:
         return "Straight cone or V (fixed)"
+    if key == ideal.BEST:
+        return "Best-fitting ideal (each half its own)"
     return f"Best-fitting {ideal.FAMILIES[key]['name'].lower()}"
 
 
 def choice_note(key: str) -> str:
     if key == ideal.STRAIGHT:
         return "A fixed straight line from apex to foot on each half: the perfect cone or V."
+    if key == ideal.BEST:
+        return ("Each half is fitted on its own, pinned at its own crest, and takes whichever "
+                "family leaves the least rock out of place on it, so a lopsided feature is "
+                "never forced into one shape.")
     return ideal.FAMILIES[key]["note"]
 
 
@@ -201,7 +207,7 @@ def fingerprint_figure(item: dict, key: str):
             continue
         names.append(choice_label(k).replace("Best-fitting ", "Best ").replace(" (fixed)", ""))
         vals.append(100.0 * item["comparisons"][k]["departure"])
-        colours.append(HIGHLIGHT if k == item["family"] else BAR_MUTED)
+        colours.append(HIGHLIGHT if k == key else BAR_MUTED)
     fig = go.Figure(go.Bar(
         x=vals, y=names, orientation="h", marker=dict(color=colours, line=dict(width=0)),
         text=[f"{v:.1f}%" for v in vals], textposition="outside",
@@ -374,10 +380,14 @@ Every profile goes through the same five steps:
 1. **Locate.** Find the apex (the summit of a hill, the floor of a valley, the head of a long
    profile) and the foot of each side (the base of a hill, each rim of a valley, the mouth).
    Both feet sit at one level, the higher of the two sides' bases, so a volcano on a regional
-   slope is read down to its own foot, not out across the slope. A valley with one rim lower
+   slope is read down to its own foot, not out across the slope. A summit split by a depression
+   (a caldera, or the rift valley of a slow spreading ridge) is read from the middle of the
+   depression, with each side from its own rim. A valley with one rim lower
    than the other is read up to the lower rim.
-2. **Half profiles.** Split at the apex. Each half is scaled to its own width, so a lopsided
-   feature keeps its shape instead of being averaged.
+2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height,
+   from its own crest (the apex, or its side's caldera rim or rift mountain) down to the foot, so
+   a lopsided feature keeps its shape instead of being averaged. Nothing assumes the two sides
+   are alike.
 3. **Fit four ideal curves to each half.** Each is pinned to the apex and the foot and has one
    free control, so they compete on equal terms:
    - **Parabola** (control *k*): every true parabola from the concave one with its vertex at the
@@ -391,8 +401,9 @@ Every profile goes through the same five steps:
      parabola - the strongly concave cone (e about 0.5), the semicircle (e = 2), the box.
 
    The best member of each family is the one that leaves the least rock out of place.
-4. **Choose.** The family that leaves the least rock out of place is the ideal. On a near tie
-   (within 0.1% of the box) the order above wins, parabola first.
+4. **Choose, half by half.** On each half, the family that leaves the least rock out of place is
+   that half's ideal, so the two sides of a lopsided feature can take different curves. On a
+   near tie (within 0.1% of the box) the order above wins, parabola first.
 5. **Measure.** Extra rock (blue) and missing rock (red) between the profile and that ideal, as a
    share of the feature's box (width times height). **Departure** is the two added together.
    The sign is about rock on a hill and in a valley alike.
@@ -519,15 +530,14 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, r
         st.plotly_chart(fingerprint_figure(item, pick), width="stretch")
         rows = []
         side_name = {"L": "left", "R": "right", "D": "downslope"}
-        spec = ideal.FAMILIES[fam]
+        best = item["comparisons"][fam]
         for h in item["halves"]:
             d = item["by_side"][h["side"]]
-            v = item["comparisons"][fam]["params"][h["side"]]
             rows.append({
                 "Half": side_name[h["side"]],
                 "Width": _num(h["radius"]),
                 "Height": _num(h["height"]),
-                f"{spec['name'].split(' ')[0]} {spec['param']}": f"{v:+.2f}" if fam != "superellipse" else f"{v:.2f}",
+                "Ideal": ideal.half_words(best["fams"][h["side"]], best["params"][h["side"]]),
                 "Departure": _pct(d["departure"]),
                 "Fullness": f"{d['fullness']:.3f}",
             })

@@ -894,3 +894,111 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
         "Asymmetry": item["m"]["asymmetry"],
     })
     return row
+
+
+# =====================================================================
+# Mid-ocean ridges
+#
+# A spreading ridge is read twice by the same fixed procedure, at two scales:
+#
+#   the WHOLE RIDGE, the full profile as a hill. Away from the axis the sea
+#   floor deepens with the square root of its age (half-space cooling), so the
+#   ridge is a broad concave rise. That subsidence is symmetric and is the
+#   ridge itself, not a tilt under it, so it is fitted, not removed.
+#
+#   the AXIS, the ground within axis_window of the spreading axis, read both
+#   as a hill and as a valley. Whichever reading puts its apex on the axis
+#   says what the axis is: an axial high (its summit is on the axis) or an
+#   axial rift valley (its floor is). The other reading lands off the axis, on
+#   a rift mountain or in a trough on the flank.
+#
+# On 27 swath-median ETOPO1 profiles across 9 ridges from 14 to 145 mm/yr
+# (three parallel profiles each, 20 km apart along the axis), every profile
+# across a slow or ultraslow ridge (under 40 mm/yr) had an axial valley except
+# two of the three on the southern Mid-Atlantic Ridge, and every profile
+# across an intermediate or fast ridge had an axial high. The axial highs split by their fullness:
+# intermediate ridges (56 and 70 mm/yr) 0.45 to 0.62, a low straight-sided to
+# dome-shaped rise; fast ridges (90 to 145 mm/yr) 0.27 to 0.34, a peaked
+# concave rise. Removing a fitted square-root-of-age ramp before reading the
+# axis blurred that split, so the profile is read as it is. The fullness limit
+# was set on these same profiles; the high-or-valley reading was not tuned.
+#
+# PROVISIONAL: the class limits come from those 9 ridges at about 2 km
+# resolution, not from a calibrated population, and hotspot-influenced
+# ridges (Reykjanes, Galapagos) were not tested.
+# =====================================================================
+RIDGE = {
+    # The axis zone read as a hill and as a valley, either side of the axis (metres).
+    "axis_window": 40_000.0,
+    # An apex this close to the axis is on it (metres).
+    "on_axis": 10_000.0,
+    # Axial highs fuller than this read as intermediate, emptier as fast.
+    "fast_fullness": 0.40,
+}
+
+RIDGE_CLASSES = {
+    "slow": "slow or ultraslow (under about 40 mm/yr)",
+    "intermediate": "intermediate (about 50 to 80 mm/yr)",
+    "fast": "fast (over about 80 mm/yr)",
+    "unclear": "unclear",
+}
+
+
+def cooling_curve(u) -> np.ndarray:
+    """Depth below the axis growing with the square root of age, as a half profile: g = 1 - sqrt(u)."""
+    return 1.0 - np.sqrt(np.clip(np.asarray(u, float), 0.0, 1.0))
+
+
+def ridge_axis_x(x) -> float:
+    """The spreading axis: distance 0 when it lies in the middle half of the profile, else the middle."""
+    x = np.asarray(x, dtype=float)
+    lo, hi = float(np.nanmin(x)), float(np.nanmax(x))
+    q1, q3 = lo + 0.25 * (hi - lo), lo + 0.75 * (hi - lo)
+    return 0.0 if q1 <= 0.0 <= q3 else 0.5 * (lo + hi)
+
+
+def read_ridge(x, z, axis: float | None = None) -> dict:
+    """A spreading ridge by the fixed procedure, read whole and at its axis. Distances in metres.
+
+    Returns the three measurements (whole, axis_hill, axis_valley), the axis
+    position, which reading is on the axis, and the provisional rate class.
+    """
+    x = np.asarray(x, dtype=float)
+    z = np.asarray(z, dtype=float)
+    ax = ridge_axis_x(x) if axis is None else float(axis)
+    whole = measure(x, z, HILL)
+    near = np.abs(x - ax) <= RIDGE["axis_window"]
+    hill = measure(x[near], z[near], HILL)
+    valley = measure(x[near], z[near], VALLEY)
+
+    def on_axis(it):
+        return bool(it.get("ok")) and abs(it["m"]["x_apex"] - ax) <= RIDGE["on_axis"]
+
+    hi, lo = on_axis(hill), on_axis(valley)
+    if hi and lo:
+        # Both apexes on the axis: the bigger feature is the axis.
+        hi = hill["m"]["height"] >= valley["m"]["height"]
+        lo = not hi
+    if lo:
+        axis_type, rate, axis_item = "axial valley", "slow", valley
+    elif hi:
+        axis_type, axis_item = "axial high", hill
+        rate = "intermediate" if hill["fullness"] >= RIDGE["fast_fullness"] else "fast"
+    else:
+        axis_type, rate, axis_item = "no clear axial feature", "unclear", None
+    cool = float("nan")
+    if whole.get("ok"):
+        g = cooling_curve(U)
+        cool = compare(whole["halves"], {h["side"]: g for h in whole["halves"]}, HILL)["departure"]
+    return {
+        "axis": ax,
+        "whole": whole,
+        "axis_hill": hill,
+        "axis_valley": valley,
+        "axis_type": axis_type,
+        "axis_item": axis_item,
+        "rate_class": rate,
+        "rate_words": RIDGE_CLASSES[rate],
+        "whole_on_axis": on_axis(whole),
+        "cooling_departure": cool,
+    }

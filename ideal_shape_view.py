@@ -39,7 +39,10 @@ FEATURE_CHOICES = {
     "Valley": ideal.VALLEY,
     "Hill or mountain": ideal.HILL,
     "One slope (long profile)": ideal.SLOPE,
+    # Fitted whole as a hill, and read again at its axis (ideal.read_ridge).
+    "Spreading ridge": ideal.HILL,
 }
+RIDGE_FEATURE = "Spreading ridge"
 
 DISTANCE_UNITS = {"metres": 1.0, "kilometres": 1000.0, "feet": 0.3048, "miles": 1609.344}
 ELEVATION_UNITS = {"metres": 1.0, "feet": 0.3048, "kilometres": 1000.0}
@@ -406,7 +409,67 @@ the app, not from a calibrated population.
         )
 
 
-def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str):
+def ridge_to_display_units(ridge: dict, sx: float, sz: float) -> dict:
+    out = dict(ridge, axis=ridge["axis"] / sx)
+    for k in ("whole", "axis_hill", "axis_valley"):
+        out[k] = to_display_units(ridge[k], sx, sz)
+    out["axis_item"] = {"axial high": out["axis_hill"], "axial valley": out["axis_valley"]}.get(ridge["axis_type"])
+    return out
+
+
+def render_ridge_block(ridge: dict, x_label: str, y_label: str):
+    """What the spreading axis is, and the spreading rate it points to."""
+    st.markdown(f"### Spreading axis: {ridge['axis_type']}")
+    it = ridge["axis_item"]
+    win = ideal.RIDGE["axis_window"] / 1000
+    if it is None:
+        st.info(
+            f"Within {win:.0f} km of the axis neither the hill reading nor the valley reading puts its "
+            "apex on the axis, so the axis cannot be classed. Check that the axis is at distance 0, "
+            "or in the middle of the profile, and that distances are in the units chosen above."
+        )
+        return
+    words = ideal.VOCAB[it["kind"]]
+    other = ridge["axis_valley"] if it is ridge["axis_hill"] else ridge["axis_hill"]
+    other_words = ideal.VOCAB[other["kind"]]
+    st.caption(
+        f"Read as **{ideal.RIDGE_CLASSES[ridge['rate_class']]}** (provisional). The ground within "
+        f"{win:.0f} km of the axis is fitted as a hill and as a valley; the {words['feature']} reading "
+        f"puts its {words['apex']} on the axis"
+        + (f", while the {other_words['feature']} reading puts its {other_words['apex']} "
+           f"{_num(abs(other['m']['x_apex'] - ridge['axis']))} {st.session_state.get('ideal_distance_unit', '')} "
+           "away, on the flank."
+           if other.get("ok") else f"; there is no {other_words['feature']} to read.")
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(f"{ridge['axis_type'].capitalize()} relief", _num(it["m"]["height"]),
+              help=f"Height of the axis feature from its {words['apex']} to its {words['foot']}, in "
+                   "the elevation units of the file.")
+    c2.metric("Its fullness", f"{it['fullness']:.3f}",
+              help=f"Axial highs fuller than {ideal.RIDGE['fast_fullness']:.2f} (a low straight to "
+                   "domed rise) read as intermediate, emptier ones (a peaked concave rise) as fast.")
+    c3.metric("Its departure", _pct(it["departure"]))
+    c4.metric("Whole ridge from the cooling curve", _pct(ridge["cooling_departure"]),
+              help="Rock out of place on the whole ridge against depth growing with the square root of "
+                   "age (half-space cooling), g = 1 - sqrt(u), pinned to the same summit and feet.")
+    fig = overlay_figure(it, it["family"], x_label, y_label)
+    fig.add_vline(x=ridge["axis"], line=dict(color=HIGHLIGHT, width=1.5, dash="dash"),
+                  annotation_text="axis", annotation_position="top")
+    fig.update_layout(title=f"The {ridge['axis_type']}: {it['name']}, {ideal.fit_words(it)}")
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Slow ridges open an axial rift valley between rift mountains; fast ridges build an axial high "
+        "on a broad dome. The class limits were set on 9 real ridges (14 to 145 mm/yr) at about 2 km "
+        "resolution and are provisional. The whole ridge, fitted below, "
+        + ("has its summit on the axis." if ridge["whole_on_axis"] else
+           "has its summit off the axis, on a rift mountain, as slow ridges do.")
+    )
+
+
+def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, ridge: dict | None = None):
+    if ridge is not None:
+        render_ridge_block(ridge, x_label, y_label)
+        st.markdown("#### The whole ridge")
     if not item.get("ok"):
         st.warning(item.get("problem") or "This profile could not be fitted.")
         render_explainer()

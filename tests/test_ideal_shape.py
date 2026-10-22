@@ -211,3 +211,40 @@ def test_every_sample_profile_measures(path):
     # The chosen ideal is never worse than a straight cone or V.
     assert item["departure"] <= item["comparisons"][I.STRAIGHT]["departure"] + 1e-9
     assert I.summary_row(item, path.stem)
+
+
+RIDGE_CLASS = {"ultraslow": "slow", "slow": "slow", "intermediate": "intermediate", "fast": "fast",
+               "superfast": "fast"}
+
+
+@pytest.mark.parametrize("path", sorted((ROOT / "samples").glob("sample_real_ridge_*.csv")))
+def test_each_real_ridge_reads_as_its_spreading_rate(path):
+    d = pd.read_csv(path)
+    r = I.read_ridge(d.iloc[:, 0], d.iloc[:, 1])
+    assert r["rate_class"] == RIDGE_CLASS[path.stem.rsplit("_", 1)[-1]]
+    assert r["axis_type"] == ("axial valley" if r["rate_class"] == "slow" else "axial high")
+    assert r["whole"]["ok"] and np.isfinite(r["cooling_departure"])
+
+
+def _cooling_ridge(axial):
+    """Sea floor deepening with the square root of distance, plus an axial feature."""
+    x = np.arange(-200_000.0, 200_001.0, 500.0)
+    return x, -2500.0 - 6.0 * np.sqrt(np.abs(x)) + axial(np.abs(x))
+
+
+def test_an_axial_rift_valley_reads_slow():
+    x, z = _cooling_ridge(lambda r: -1500.0 * np.clip(1 - r / 15_000, 0, 1) + 800.0 * np.exp(-((r - 20_000) / 6000) ** 2))
+    r = I.read_ridge(x, z)
+    assert r["axis_type"] == "axial valley" and r["rate_class"] == "slow"
+    assert abs(r["axis_valley"]["m"]["x_apex"]) <= I.RIDGE["on_axis"]
+
+
+def test_a_peaked_axial_high_reads_fast_and_a_pure_cooling_ridge_fits_the_cooling_curve():
+    x, z = _cooling_ridge(lambda r: 0.0 * r)
+    r = I.read_ridge(x, z)
+    # Only the smoothing of the sharp crest is left, and none of the four families does as well.
+    assert r["cooling_departure"] < 0.02
+    assert r["cooling_departure"] < r["whole"]["departure"]
+    x, z = _cooling_ridge(lambda r: 300.0 * np.exp(-r / 4000))
+    r = I.read_ridge(x, z)
+    assert r["axis_type"] == "axial high" and r["rate_class"] == "fast"

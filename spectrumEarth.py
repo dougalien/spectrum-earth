@@ -2672,7 +2672,7 @@ def add_lattice_grid(fig, lattice: pd.DataFrame):
     for wd in sorted(lattice["wd_in"].unique()):
         fig.add_annotation(
             x=left, y=wd, text=f"W/D {wd:g}", showarrow=False,
-            xanchor="right", xshift=-6, font=dict(size=10, color="#8a8981"),
+            xanchor="right", xshift=-6, font=dict(size=10, color="#586770"),
         )
     return fig
 
@@ -2963,15 +2963,15 @@ def make_shape_register_plot(
     if (not _regions) and view in ("Form vs aspect", "Off-manifold vs form"):
         fig.add_vline(x=1.0, line=dict(color="#c9c8c2", width=1, dash="dot"))
         fig.add_annotation(x=1.0, y=1.02, yref="paper", text="straight V",
-                           showarrow=False, font=dict(size=10, color="#8a8981"))
+                           showarrow=False, font=dict(size=10, color="#586770"))
         fig.add_vline(x=2.0, line=dict(color="#c9c8c2", width=1, dash="dot"))
         fig.add_annotation(x=2.0, y=1.02, yref="paper", text="parabola",
-                           showarrow=False, font=dict(size=10, color="#8a8981"))
+                           showarrow=False, font=dict(size=10, color="#586770"))
     if (not _regions) and "delta" in yk:
         fig.add_hline(y=0.0, line=dict(color="#c9c8c2", width=1))
         fig.add_annotation(x=0.02, y=0.0, xref="paper", text="power-law manifold",
                            showarrow=False, yshift=10, xanchor="left",
-                           font=dict(size=10, color="#8a8981"))
+                           font=dict(size=10, color="#586770"))
 
     if pinned:
         groups_in_order = []

@@ -1723,7 +1723,7 @@ SAMPLE_FILES = {   # synthetic profiles in samples/; the Dataset Type each one s
     "Real ridge: SW Indian Ridge 10°E, ultraslow (14 mm/yr)": "sample_real_ridge_swir_10e_ultraslow.csv",
     "Real ridge: Mohns Ridge 72°N, ultraslow (16 mm/yr)": "sample_real_ridge_mohns_72n_ultraslow.csv",
     "Real ridge: Mid-Atlantic Ridge 26°N, slow (25 mm/yr)": "sample_real_ridge_mar_26n_slow.csv",
-    "Real ridge: Mid-Atlantic Ridge 25.6°S, slow (34 mm/yr)": "sample_real_ridge_mar_25s_slow.csv",
+    "Real ridge: Mid-Atlantic Ridge 29°N, slow (24 mm/yr)": "sample_real_ridge_mar_29n_slow.csv",
     "Real ridge: Juan de Fuca 45°N, intermediate (56 mm/yr)": "sample_real_ridge_juandefuca_45n_intermediate.csv",
     "Real ridge: SE Indian Ridge 98°E, intermediate (70 mm/yr)": "sample_real_ridge_seir_98e_intermediate.csv",
     "Real ridge: East Pacific Rise 12.5°N, fast (90 mm/yr)": "sample_real_ridge_epr_12n_fast.csv",

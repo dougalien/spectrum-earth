@@ -410,7 +410,7 @@ the app, not from a calibrated population.
 
 
 def ridge_to_display_units(ridge: dict, sx: float, sz: float) -> dict:
-    out = dict(ridge, axis=ridge["axis"] / sx)
+    out = dict(ridge, axis=ridge["axis"] / sx, crest_split=ridge["crest_split"] / sx)
     for k in ("whole", "axis_hill", "axis_valley"):
         out[k] = to_display_units(ridge[k], sx, sz)
     out["axis_item"] = {"axial high": out["axis_hill"], "axial valley": out["axis_valley"]}.get(ridge["axis_type"])
@@ -460,9 +460,11 @@ def render_ridge_block(ridge: dict, x_label: str, y_label: str):
     st.caption(
         "Slow ridges open an axial rift valley between rift mountains; fast ridges build an axial high "
         "on a broad dome. The class limits were set on 9 real ridges (14 to 145 mm/yr) at about 2 km "
-        "resolution and are provisional. The whole ridge, fitted below, "
-        + ("has its summit on the axis." if ridge["whole_on_axis"] else
-           "has its summit off the axis, on a rift mountain, as slow ridges do.")
+        "resolution and are provisional. The whole ridge, fitted below, is read out from the axis"
+        + (f"; its crest is split by the rift valley between rift mountains {_num(ridge['crest_split'])} "
+           f"{st.session_state.get('ideal_distance_unit', '')} apart, so the ideal is level across them, "
+           "as across a caldera, and the rock dropped into the valley is missing rock."
+           if ridge["crest_split"] > 0 else ".")
     )
 
 

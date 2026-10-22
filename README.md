@@ -30,19 +30,19 @@ The fitting engine is `ideal_shape.py`. It has no Streamlit dependency and is po
 
 Choose **Spreading ridge** under "What is the feature?" for a cross-section of a spreading centre, with the axis at distance 0 (or in the middle of the profile). The same fixed procedure reads it twice:
 
-- **The whole ridge** is fitted as a hill. The sea floor deepens with the square root of its age away from the axis, so this regional ramp is the ridge itself, symmetric about the axis, and is fitted rather than removed. Its departure from the cooling curve `g = 1 - sqrt(u)` is shown alongside.
+- **The whole ridge** is fitted as a hill, read out from the axis rather than from its highest point, so both flanks are fitted even where a rift mountain stands higher than the axis. Where the axis is a rift valley the crest is split: the ideal is level across it between the rift mountains, as across a caldera, and the rock dropped down into the valley counts as missing rock. The sea floor deepens with the square root of its age away from the axis, so this regional ramp is the ridge itself, symmetric about the axis, and is fitted rather than removed. Its departure from the cooling curve `g = 1 - sqrt(u)` is shown alongside.
 - **The axis** (the ground within 40 km of it) is fitted as a hill and as a valley. Whichever reading puts its apex on the axis says what the axis is: an **axial valley** or an **axial high**.
 
-An axial valley reads as a slow or ultraslow ridge (under about 40 mm/yr). An axial high reads as intermediate (about 50 to 80 mm/yr) when it is full, a low straight-sided to domed rise (fullness 0.40 or more), and as fast (over about 80 mm/yr) when it is a peaked concave rise. On 27 profiles across the 9 sample ridges (three per ridge, 20 km apart along the axis), 25 were classed right; the two misses were both on the southern Mid-Atlantic Ridge. The fullness limit was set on these same profiles, so it is provisional. Removing a fitted square-root-of-age ramp before reading the axis blurred the intermediate and fast ridges together, so the profile is read as it is.
+An axial valley reads as a slow or ultraslow ridge (under about 40 mm/yr). An axial high reads as intermediate (about 50 to 80 mm/yr) when it is full, a low straight-sided to domed rise (fullness 0.40 or more), and as fast (over about 80 mm/yr) when it is a peaked concave rise. On 27 profiles across the 9 sample ridges (three per ridge, 20 km apart along the axis), all 27 were classed right, and every slow ridge's crest was split 30 to 72 km wide by its rift valley. A southern Mid-Atlantic Ridge profile (25.6°S) was tried first and dropped: in ETOPO1 its axis shifts between parallel lines and an off-axis trough cuts its flank. The fullness limit was set on these same profiles, so it is provisional. Removing a fitted square-root-of-age ramp before reading the axis blurred the intermediate and fast ridges together, so the profile is read as it is.
 
-The nine "Real ridge" samples are swath medians (7 parallel lines over 30 km, 15 km for the southern Mid-Atlantic Ridge) of ETOPO1 1 arc-minute bathymetry (NOAA), read from the public AWS Terrain Tiles. `tools/ridge_profile.py` makes more. At about 2 km resolution the narrow summit of a fast ridge is smoothed; GMRT multibeam grids would sharpen it.
+The nine "Real ridge" samples are swath medians (7 parallel lines over 30 km) of ETOPO1 1 arc-minute bathymetry (NOAA), read from the public AWS Terrain Tiles. `tools/ridge_profile.py` makes more. At about 2 km resolution the narrow summit of a fast ridge is smoothed; GMRT multibeam grids would sharpen it.
 
 | Sample | Axis point (lon, lat) | Azimuth | Full rate |
 |---|---|---|---|
 | SW Indian Ridge 10°E | 9.743, -52.979 | 145° | ~14 mm/yr |
 | Mohns Ridge 72°N | 1.744, 72.410 | 145° | ~16 mm/yr |
 | Mid-Atlantic Ridge 26°N | -44.850, 26.130 | 105° | ~25 mm/yr |
-| Mid-Atlantic Ridge 25.6°S | -13.750, -25.635 | 90° | ~34 mm/yr |
+| Mid-Atlantic Ridge 29°N | -43.160, 29.168 | 100° | ~24 mm/yr |
 | Juan de Fuca 45°N | -130.200, 45.300 | 110° | ~56 mm/yr |
 | SE Indian Ridge 98°E | 97.633, -47.490 | 39° | ~70 mm/yr |
 | East Pacific Rise 12.5°N | -103.904, 12.504 | 85° | ~90 mm/yr |

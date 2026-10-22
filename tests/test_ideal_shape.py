@@ -224,6 +224,11 @@ def test_each_real_ridge_reads_as_its_spreading_rate(path):
     assert r["rate_class"] == RIDGE_CLASS[path.stem.rsplit("_", 1)[-1]]
     assert r["axis_type"] == ("axial valley" if r["rate_class"] == "slow" else "axial high")
     assert r["whole"]["ok"] and np.isfinite(r["cooling_departure"])
+    # The whole ridge is read out from the axis, down both flanks.
+    m = r["whole"]["m"]
+    assert m["x_apex"] == r["axis"]
+    assert min(r["axis"] - m["x_left"], m["x_right"] - r["axis"]) > 50_000.0
+    assert (r["crest_split"] > 20_000.0) == (r["rate_class"] == "slow")
 
 
 def _cooling_ridge(axial):

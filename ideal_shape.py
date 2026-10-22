@@ -755,8 +755,13 @@ def fit_words(item: dict) -> str:
     return f"{spec['name'].lower()}, {spec['param']} = {parts}"
 
 
-def measure(x, z, kind: str = HILL) -> dict:
-    """Everything for one profile, by the fixed procedure above. Never raises."""
+def measure(x, z, kind: str = HILL, ridge_axis: float | None = None, crest: str = "flat") -> dict:
+    """Everything for one profile, by the fixed procedure above. Never raises.
+
+    With ridge_axis, a hill is located from that spreading axis instead of from
+    its highest point (locate_ridge); crest "flat" holds the ideal level across
+    the crest between the rift mountains, crest "point" pins it at the axis.
+    """
     item = {"kind": kind, "ok": False, "notes": [], "problem": ""}
     x = np.asarray(x, dtype=float)
     z = np.asarray(z, dtype=float)
@@ -776,6 +781,9 @@ def measure(x, z, kind: str = HILL) -> dict:
     # Steps 1 and 2: locate and normalise.
     if kind == SLOPE:
         m, notes, halves = analyse_slope(x, z)
+    elif ridge_axis is not None:
+        m, notes = locate_ridge(x, z, ridge_axis)
+        halves = half_profiles(x, z, m, kind) if m else []
     else:
         m, notes = analyse_profile(x, z, kind)
         halves = half_profiles(x, z, m, kind) if m else []
@@ -799,7 +807,14 @@ def measure(x, z, kind: str = HILL) -> dict:
     # edge and the curves are fitted to the walls beyond.
     smooth_by_side = {h["side"]: fit_smooth(h) for h in halves} if kind != SLOPE else {}
     flat = kind != SLOPE and has_flat_apex({"m": m, "smooth_by_side": smooth_by_side})
-    for h in halves:
+    if ridge_axis is not None:
+        # The crest of a ridge is measured from its rift mountains: level
+        # between them, or pinned at the axis.
+        flat = crest == "flat" and m["plateau"] > 0.0
+        for h in halves:
+            edge = (m["x_apex"] - m["x_flat_left"]) if h["side"] == "L" else (m["x_flat_right"] - m["x_apex"])
+            h["flat_u"] = float(np.clip(edge / h["radius"], 0.0, 0.9)) if flat and h["radius"] > 0 else 0.0
+    for h in halves if ridge_axis is None else []:
         edge = {"L": m["x_apex"] - m.get("x_flat_left", m["x_apex"]),
                 "R": m.get("x_flat_right", m["x_apex"]) - m["x_apex"]}.get(h["side"], 0.0)
         if not flat or h["radius"] <= 0:
@@ -901,10 +916,16 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
 #
 # A spreading ridge is read twice by the same fixed procedure, at two scales:
 #
-#   the WHOLE RIDGE, the full profile as a hill. Away from the axis the sea
-#   floor deepens with the square root of its age (half-space cooling), so the
-#   ridge is a broad concave rise. That subsidence is symmetric and is the
-#   ridge itself, not a tilt under it, so it is fitted, not removed.
+#   the WHOLE RIDGE, the full profile as a hill, located from the axis
+#   (locate_ridge), not from its highest point: on a slow ridge the highest
+#   point is a rift mountain to one side, and the summit there read only half
+#   the ridge. Away from the axis the sea floor deepens with the square root of
+#   its age (half-space cooling), so the ridge is a broad concave rise. That
+#   subsidence is symmetric and is the ridge itself, not a tilt under it, so it
+#   is fitted, not removed. Where the axis is a rift valley the crest is split:
+#   the ideal is level across it between the rift mountains, as across a
+#   caldera, so the rock dropped down into the valley is missing rock, and the
+#   flanks are fitted from each rift mountain down to the foot.
 #
 #   the AXIS, the ground within axis_window of the spreading axis, read both
 #   as a hill and as a valley. Whichever reading puts its apex on the axis
@@ -914,9 +935,9 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
 #
 # On 27 swath-median ETOPO1 profiles across 9 ridges from 14 to 145 mm/yr
 # (three parallel profiles each, 20 km apart along the axis), every profile
-# across a slow or ultraslow ridge (under 40 mm/yr) had an axial valley except
-# two of the three on the southern Mid-Atlantic Ridge, and every profile
-# across an intermediate or fast ridge had an axial high. The axial highs split by their fullness:
+# across a slow or ultraslow ridge (under 40 mm/yr) had an axial valley, its
+# crest split 30 to 72 km wide, and every profile across an intermediate or
+# fast ridge had an axial high. The axial highs split by their fullness:
 # intermediate ridges (56 and 70 mm/yr) 0.45 to 0.62, a low straight-sided to
 # dome-shaped rise; fast ridges (90 to 145 mm/yr) 0.27 to 0.34, a peaked
 # concave rise. Removing a fitted square-root-of-age ramp before reading the
@@ -944,6 +965,72 @@ RIDGE_CLASSES = {
 }
 
 
+def locate_ridge(x, z, axis: float) -> tuple[dict, list]:
+    """Apex, crest and feet of a spreading ridge, measured out from its axis.
+
+    The highest ground within axis_window on each side is that side's crest
+    (on a slow ridge, the rift mountain; on a fast one, the axial high itself).
+    The apex is the axis, at the level of the higher crest, so the two flanks
+    are read as one ridge even where a rift valley splits the crest. The feet
+    follow the fixed rule: both at the higher of the two sides' bases, at the
+    first crossing going out from each crest.
+    """
+    x = np.asarray(x, dtype=float)
+    z = np.asarray(z, dtype=float)
+    xs, zs = _resample(x, z, float(x.min()), float(x.max()))
+    w = RIDGE["axis_window"]
+    left = np.flatnonzero((xs >= axis - w) & (xs <= axis))
+    right = np.flatnonzero((xs >= axis) & (xs <= axis + w))
+    if len(left) < 2 or len(right) < 2 or left[0] < 4 or right[-1] > len(xs) - 5:
+        return {}, ["The axis is too close to an end of the profile. Centre the profile on the "
+                    "spreading axis, at distance 0, with at least 50 km on each side."]
+    kl = int(left[np.argmax(zs[left])])
+    kr = int(right[np.argmax(zs[right])])
+    z_top = float(max(zs[kl], zs[kr]))
+    q = PROCESSING["base_quantile"]
+    base_l = float(np.quantile(zs[: kl + 1], q))
+    base_r = float(np.quantile(zs[kr:], q))
+    z_base = max(base_l, base_r)
+    height = z_top - z_base
+    if height <= 0:
+        return {}, ["There is no relief between the crest of the ridge and its foot."]
+
+    def crossing(k: int, step: int):
+        i = k
+        while 0 <= i < len(zs) and zs[i] > z_base:
+            i += step
+        return float(xs[min(max(i, 0), len(xs) - 1)])
+
+    xl, xr = crossing(kl, -1), crossing(kr, 1)
+    width = xr - xl
+    notes = []
+    if abs(zs[kl] - zs[kr]) > 0.25 * height:
+        notes.append(
+            f"The two crests stand {abs(zs[kl] - zs[kr]) / height:.0%} of the height apart; the ridge "
+            "is read from the higher one, so the lower crest shows as missing rock."
+        )
+    depth = np.clip(zs - z_base, 0.0, None)
+    lm, rm = (xs >= xl) & (xs <= axis), (xs >= axis) & (xs <= xr)
+    a_l = float(np.trapezoid(depth[lm], xs[lm])) if lm.sum() > 1 else 0.0
+    a_r = float(np.trapezoid(depth[rm], xs[rm])) if rm.sum() > 1 else 0.0
+    return {
+        "height": height,
+        "width": width,
+        "width_height": width / height,
+        "plateau": float(xs[kr] - xs[kl]) / width,
+        "asymmetry": abs(a_r - a_l) / (a_r + a_l) if (a_r + a_l) > 0 else float("nan"),
+        "apex_elev": z_top,
+        "base_elev": z_base,
+        "base_left": z_base,
+        "base_right": z_base,
+        "x_left": xl,
+        "x_right": xr,
+        "x_apex": float(axis),
+        "x_flat_left": float(xs[kl]),
+        "x_flat_right": float(xs[kr]),
+    }, notes
+
+
 def cooling_curve(u) -> np.ndarray:
     """Depth below the axis growing with the square root of age, as a half profile: g = 1 - sqrt(u)."""
     return 1.0 - np.sqrt(np.clip(np.asarray(u, float), 0.0, 1.0))
@@ -966,7 +1053,6 @@ def read_ridge(x, z, axis: float | None = None) -> dict:
     x = np.asarray(x, dtype=float)
     z = np.asarray(z, dtype=float)
     ax = ridge_axis_x(x) if axis is None else float(axis)
-    whole = measure(x, z, HILL)
     near = np.abs(x - ax) <= RIDGE["axis_window"]
     hill = measure(x[near], z[near], HILL)
     valley = measure(x[near], z[near], VALLEY)
@@ -986,6 +1072,14 @@ def read_ridge(x, z, axis: float | None = None) -> dict:
         rate = "intermediate" if hill["fullness"] >= RIDGE["fast_fullness"] else "fast"
     else:
         axis_type, rate, axis_item = "no clear axial feature", "unclear", None
+    # The whole ridge, from the axis: level across a crest split by a rift
+    # valley, pinned at the axis otherwise.
+    whole = measure(x, z, HILL, ridge_axis=ax, crest="flat" if lo else "point")
+    split = 0.0
+    if whole.get("ok"):
+        if lo:
+            split = whole["m"]["x_flat_right"] - whole["m"]["x_flat_left"]
+            whole["name"] = whole["name"].replace(f" with a {VOCAB[HILL]['flat']}", "") + " split by a rift valley"
     cool = float("nan")
     if whole.get("ok"):
         g = cooling_curve(U)
@@ -999,6 +1093,6 @@ def read_ridge(x, z, axis: float | None = None) -> dict:
         "axis_item": axis_item,
         "rate_class": rate,
         "rate_words": RIDGE_CLASSES[rate],
-        "whole_on_axis": on_axis(whole),
+        "crest_split": split,
         "cooling_departure": cool,
     }

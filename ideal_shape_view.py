@@ -2,9 +2,11 @@
 The Ideal Shape and Shape Chart views of Spectrum Earth.
 
 Everything measured here comes from ideal_shape.py; this module only draws it
-and lays it out. Excess and missing rock are a polarity, so they take the
-diverging pair (blue / red). Feature types on the shape chart take the first
-three categorical slots, the most a scatter can carry safely.
+and lays it out. Every landform gets the same two things: the plot of the fit
+(the real profile, its ideal, and the extra and missing rock between them) and
+its departure number. Extra and missing rock are a polarity, so they take the
+diverging pair (blue / red); feature types on the shape chart take the first
+three categorical slots.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
 import ideal_shape as ideal
 
@@ -24,22 +25,17 @@ INK_2 = "#52514e"
 MUTED = "#8a8981"
 GRID = "#eceae4"
 FAINT = "#d8d6ce"
-EXCESS = "#2a78d6"
-DEFICIT = "#d03b3b"
 EXCESS_FILL = "rgba(42,120,214,0.30)"
 DEFICIT_FILL = "rgba(208,59,59,0.30)"
 HIGHLIGHT = "#2a78d6"
-BAR_MUTED = "#b9c6d8"
 
 FEATURE_COLOURS = {"hill": "#2a78d6", "valley": "#eb6834", "profile": "#1baf7a"}
-GROUP_SYMBOLS = ["circle", "square", "triangle-up", "diamond", "triangle-down", "pentagon",
-                 "hexagon", "star", "cross", "x"]
 
 FEATURE_CHOICES = {
     "Valley": ideal.VALLEY,
     "Hill or mountain": ideal.HILL,
     "One slope (long profile)": ideal.SLOPE,
-    # Fitted whole as a hill, and read again at its axis (ideal.read_ridge).
+    # A hill framed from its spreading axis, with the axis read too (ideal.read_ridge).
     "Spreading ridge": ideal.HILL,
 }
 RIDGE_FEATURE = "Spreading ridge"
@@ -47,31 +43,14 @@ RIDGE_FEATURE = "Spreading ridge"
 DISTANCE_UNITS = {"metres": 1.0, "kilometres": 1000.0, "feet": 0.3048, "miles": 1609.344}
 ELEVATION_UNITS = {"metres": 1.0, "feet": 0.3048, "kilometres": 1000.0}
 
-CHART_Y = {
-    "Departure from the best-fitting ideal": "Departure",
-    "Departure from a straight cone or V": "Departure from straight",
-}
 
-SHAPE_ORDER = list(ideal.PERFECT_SHAPES)
-CHOICE_KEYS = [ideal.BEST] + list(ideal.FAMILIES) + [ideal.STRAIGHT]
-
-
-def choice_label(key: str) -> str:
-    if key == ideal.STRAIGHT:
-        return "Straight cone or V (fixed)"
-    if key == ideal.BEST:
-        return "Best-fitting ideal (each half its own)"
-    return f"Best-fitting {ideal.FAMILIES[key]['name'].lower()}"
-
-
-def choice_note(key: str) -> str:
-    if key == ideal.STRAIGHT:
-        return "A fixed straight line from apex to foot on each half: the perfect cone or V."
-    if key == ideal.BEST:
-        return ("Each half is fitted on its own, pinned at its own crest, and takes whichever "
-                "family leaves the least rock out of place on it, so a lopsided feature is "
-                "never forced into one shape.")
-    return ideal.FAMILIES[key]["note"]
+@st.cache_data(show_spinner="Fitting the ideal...", max_entries=128)
+def fit_profile(x: np.ndarray, z: np.ndarray, feature: str) -> tuple[dict, dict | None]:
+    """(measurement, ridge reading or None) for one profile in metres, by the fixed procedure."""
+    if feature == RIDGE_FEATURE:
+        ridge = ideal.read_ridge(x, z)
+        return ridge["whole"], ridge
+    return ideal.measure(x, z, FEATURE_CHOICES[feature]), None
 
 
 def _layout(fig, title: str, height: int, **kw):
@@ -86,20 +65,28 @@ def _layout(fig, title: str, height: int, **kw):
     return fig
 
 
+def _pct(v: float, signed: bool = False) -> str:
+    if not np.isfinite(v):
+        return "-"
+    return f"{v * 100:+.1f}%" if signed else f"{v * 100:.1f}%"
+
+
+def _num(v: float) -> str:
+    return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:,.4g}"
+
+
 # =====================================================================
-# Turning half profiles back into real coordinates
+# The plot of the fit
 # =====================================================================
-def _real_halves(item: dict, key: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _real_halves(item: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(distance, real elevation, ideal elevation) across both halves, left to right."""
     m = item["m"]
-    kind = item["kind"]
-    ideal_g = item["comparisons"][key]["ideal"]
     xs, zr, zi = [], [], []
     for h in item["halves"]:
         x = m["x_apex"] + h["sign"] * ideal.U * h["radius"]
         z_real = h["base"] + h["g"] * h["height"]
-        z_ideal = h["base"] + ideal_g[h["side"]] * h["height"]
-        if kind == ideal.VALLEY:
+        z_ideal = h["base"] + item["ideal"][h["side"]] * h["height"]
+        if item["kind"] == ideal.VALLEY:
             z_real, z_ideal = -z_real, -z_ideal
         if h["sign"] < 0:
             x, z_real, z_ideal = x[::-1], z_real[::-1], z_ideal[::-1]
@@ -111,237 +98,50 @@ def _real_halves(item: dict, key: str) -> tuple[np.ndarray, np.ndarray, np.ndarr
             np.concatenate([zi[i] for i in order]))
 
 
-def overlay_figure(item: dict, key: str, x_label: str, y_label: str):
-    """The real profile with the perfect shape drawn on it, extra and missing rock shaded."""
+def overlay_figure(item: dict, x_label: str, y_label: str, title: str = "", height: int = 470,
+                   axis: float | None = None, legend: bool = True):
+    """The real profile with its ideal drawn on it, extra and missing rock shaded."""
     fig = go.Figure()
-    x, zr, zi = _real_halves(item, key)
+    x, zr, zi = _real_halves(item)
     pad = 0.15 * (item["m"]["x_right"] - item["m"]["x_left"])
     sel = (item["x"] >= item["m"]["x_left"] - pad) & (item["x"] <= item["m"]["x_right"] + pad)
     fig.add_trace(go.Scatter(
-        x=item["x"][sel], y=item["z"][sel], mode="lines", name="data",
-        line=dict(width=1, color=FAINT), hoverinfo="skip",
+        x=item["x"][sel], y=item["z"][sel], mode="lines", name="data beyond the feet",
+        line=dict(width=1, color=FAINT), hoverinfo="skip", showlegend=legend,
     ))
     fig.add_trace(go.Scatter(x=x, y=np.maximum(zr, zi), mode="lines", line=dict(width=0),
                              showlegend=False, hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=x, y=zi, mode="lines", fill="tonexty", fillcolor=EXCESS_FILL,
-                             line=dict(width=0), name="extra rock (above the ideal)", hoverinfo="skip"))
+                             line=dict(width=0), name="extra rock (above the ideal)", hoverinfo="skip",
+                             showlegend=legend))
     fig.add_trace(go.Scatter(x=x, y=np.minimum(zr, zi), mode="lines", line=dict(width=0),
                              showlegend=False, hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=x, y=zi, mode="lines", fill="tonexty", fillcolor=DEFICIT_FILL,
-                             line=dict(width=0), name="missing rock (below the ideal)", hoverinfo="skip"))
+                             line=dict(width=0), name="missing rock (below the ideal)", hoverinfo="skip",
+                             showlegend=legend))
     fig.add_trace(go.Scatter(
-        x=x, y=zi, mode="lines", name=f"ideal: {choice_label(key)}",
-        line=dict(width=2, color=INK_2, dash="dash"),
-        hovertemplate="ideal %{y:.4g}<extra></extra>",
+        x=x, y=zi, mode="lines", name="ideal", line=dict(width=2, color=INK_2, dash="dash"),
+        hovertemplate="ideal %{y:.4g}<extra></extra>", showlegend=legend,
     ))
     fig.add_trace(go.Scatter(
-        x=x, y=zr, mode="lines", name="profile (as measured)",
-        line=dict(width=3, color=INK),
-        hovertemplate="profile %{y:.4g}<extra></extra>",
+        x=x, y=zr, mode="lines", name="profile", line=dict(width=3, color=INK),
+        hovertemplate="profile %{y:.4g}<extra></extra>", showlegend=legend,
     ))
-    m = item["m"]
-    fig.add_vline(x=m["x_apex"], line=dict(color=MUTED, width=1, dash="dot"))
-    words = ideal.VOCAB[item["kind"]]
-    ends = f"the {words['foot']}" if item["kind"] == ideal.SLOPE else f"each {words['foot']}"
-    _layout(fig, f"{choice_label(key)} pinned to the {words['apex']} and to {ends}", 470,
-            hovermode="x unified")
+    if axis is not None:
+        fig.add_vline(x=axis, line=dict(color=HIGHLIGHT, width=1.5, dash="dash"),
+                      annotation_text="axis", annotation_position="top")
+    _layout(fig, title, height, hovermode="x unified")
+    if not legend:
+        fig.update_layout(margin=dict(l=10, r=10, t=40, b=10))
     fig.update_xaxes(title=x_label)
     fig.update_yaxes(title=y_label)
     return fig
 
 
-def half_figure(item: dict, key: str):
-    """Both halves in the normalised frame, with the residual underneath."""
-    kind = item["kind"]
-    words = ideal.VOCAB[kind]
-    comp = item["comparisons"][key]
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32],
-                        vertical_spacing=0.06)
-    flip = kind == ideal.VALLEY
-    first = True
-    for h in item["halves"]:
-        s = h["sign"] if kind != ideal.SLOPE else 1.0
-        u = s * ideal.U
-        g_real = 1.0 - h["g"] if flip else h["g"]
-        g_ideal = 1.0 - comp["ideal"][h["side"]] if flip else comp["ideal"][h["side"]]
-        fig.add_trace(go.Scatter(x=u, y=g_ideal, mode="lines", name=f"ideal: {choice_label(key)}",
-                                 line=dict(width=2, color=INK_2, dash="dash"), showlegend=first,
-                                 hovertemplate="ideal %{y:.3f}<extra></extra>"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=u, y=g_real, mode="lines", name="profile", showlegend=first,
-                                 line=dict(width=3, color=INK),
-                                 hovertemplate="profile %{y:.3f}<extra></extra>"), row=1, col=1)
-        r = comp["residual"][h["side"]] * 100.0
-        fig.add_trace(go.Scatter(x=u, y=np.where(r > 0, r, 0.0), mode="lines", fill="tozeroy",
-                                 fillcolor=EXCESS_FILL, line=dict(width=0), showlegend=False,
-                                 hoverinfo="skip"), row=2, col=1)
-        fig.add_trace(go.Scatter(x=u, y=np.where(r < 0, r, 0.0), mode="lines", fill="tozeroy",
-                                 fillcolor=DEFICIT_FILL, line=dict(width=0), showlegend=False,
-                                 hoverinfo="skip"), row=2, col=1)
-        fig.add_trace(go.Scatter(x=u, y=r, mode="lines", line=dict(width=1.5, color=INK),
-                                 showlegend=False,
-                                 hovertemplate="rock vs ideal %{y:+.1f}% of height<extra></extra>"),
-                      row=2, col=1)
-        first = False
-    for edge in ideal.ZONE_EDGES:
-        for s in ((-1.0, 1.0) if kind != ideal.SLOPE else (1.0,)):
-            fig.add_vline(x=s * edge, line=dict(color=FAINT, width=1, dash="dot"))
-    fig.add_hline(y=0.0, line=dict(color=MUTED, width=1), row=2, col=1)
-    _layout(fig, "Half profiles, each on its own width", 520, hovermode="x unified")
-    if kind == ideal.SLOPE:
-        ticks = ([0, ideal.ZONE_EDGES[0], ideal.ZONE_EDGES[1], 1], [words["apex"], "", "", words["foot"]])
-    else:
-        ticks = ([-1, -ideal.ZONE_EDGES[1], -ideal.ZONE_EDGES[0], 0, ideal.ZONE_EDGES[0],
-                  ideal.ZONE_EDGES[1], 1],
-                 [words["foot"], "", "", words["apex"], "", "", words["foot"]])
-    fig.update_xaxes(tickvals=ticks[0], ticktext=ticks[1], row=2, col=1)
-    fig.update_yaxes(title="share of height", range=[-0.04, 1.08], row=1, col=1)
-    fig.update_yaxes(title="rock vs ideal, % of height", row=2, col=1)
-    return fig
-
-
-def fingerprint_figure(item: dict, key: str):
-    """How well each ideal family fits at its best, and the fixed straight line for scale."""
-    names, vals, colours = [], [], []
-    for k in CHOICE_KEYS:
-        if k not in item["comparisons"]:
-            continue
-        names.append(choice_label(k).replace("Best-fitting ", "Best ").replace(" (fixed)", ""))
-        vals.append(100.0 * item["comparisons"][k]["departure"])
-        colours.append(HIGHLIGHT if k == key else BAR_MUTED)
-    fig = go.Figure(go.Bar(
-        x=vals, y=names, orientation="h", marker=dict(color=colours, line=dict(width=0)),
-        text=[f"{v:.1f}%" for v in vals], textposition="outside",
-        textfont=dict(size=12, color=INK),
-        hovertemplate="<b>%{y}</b><br>departure %{x:.2f}% of height<extra></extra>",
-        showlegend=False,
-    ))
-    _layout(fig, "How well each ideal fits", 320, bargap=0.35)
-    fig.update_layout(margin=dict(l=20, r=60, t=60, b=20))
-    fig.update_xaxes(title="departure, % of the box (0 = this profile IS that ideal)",
-                     range=[0, max(vals) * 1.25 + 0.5])
-    fig.update_yaxes(autorange="reversed")
-    return fig
-
-
-def perfect_shapes_figure(kind: str):
-    """The landmark shapes along the form axis, drawn the way up this feature is."""
-    keys = SHAPE_ORDER
-    fig = make_subplots(rows=1, cols=len(keys), horizontal_spacing=0.02,
-                        subplot_titles=[ideal.PERFECT_SHAPES[k]["name"] for k in keys])
-    u = np.concatenate([-ideal.U[::-1], ideal.U[1:]])
-    for i, k in enumerate(keys, start=1):
-        g = ideal.PERFECT_SHAPES[k]["g"](ideal.U)
-        g2 = np.concatenate([g[::-1], g[1:]])
-        if kind == ideal.SLOPE:
-            xx, yy = ideal.U, g
-        else:
-            xx, yy = u, (1.0 - g2 if kind == ideal.VALLEY else g2)
-        fig.add_trace(go.Scatter(x=xx, y=yy, mode="lines", line=dict(width=2.5, color=INK),
-                                 fill="tozeroy" if kind != ideal.VALLEY else None,
-                                 fillcolor="rgba(82,81,78,0.10)", showlegend=False,
-                                 hoverinfo="skip"), row=1, col=i)
-        fig.update_xaxes(visible=False, row=1, col=i)
-        fig.update_yaxes(visible=False, range=[-0.05, 1.1], row=1, col=i)
-    fig.update_layout(template="plotly_white", height=210, margin=dict(l=10, r=10, t=50, b=10))
-    fig.update_annotations(font=dict(size=11, color=INK_2))
-    return fig
-
-
-def shape_chart_figure(rows: list, current: dict | None, y_col: str):
-    """Powers' chart for landforms: form across, departure from the ideal up."""
-    fig = go.Figure()
-    y_all = [r.get(y_col, np.nan) for r in rows] + ([current.get(y_col, np.nan)] if current else [])
-    y_all = [v for v in y_all if np.isfinite(v)]
-    y_top = max([0.10] + [v * 1.15 for v in y_all]) * 100.0
-
-    # Departure classes as faint bands, labelled at the right edge.
-    lo = 0.0
-    shades = ["rgba(27,175,122,0.07)", "rgba(237,161,0,0.06)", "rgba(235,104,52,0.06)",
-              "rgba(208,59,59,0.06)"]
-    if y_col == "Departure":
-        for (limit, label), shade in zip(ideal.DEPARTURE_CLASSES, shades):
-            hi = min(limit * 100.0, y_top)
-            if lo >= y_top:
-                break
-            fig.add_hrect(y0=lo, y1=hi, fillcolor=shade, line_width=0, layer="below")
-            fig.add_annotation(x=1.0, xref="x", y=0.5 * (lo + hi), text=label, showarrow=False,
-                               xanchor="right", font=dict(size=11, color=INK_2))
-            lo = hi
-
-    # The perfect shapes sit on the floor of the chart: departure 0 by definition.
-    for k in SHAPE_ORDER:
-        f = ideal.fullness(ideal.PERFECT_SHAPES[k]["g"](ideal.U))
-        name = ideal.PERFECT_SHAPES[k]["name"]
-        fig.add_vline(x=f, line=dict(color=FAINT, width=1, dash="dot"), layer="below")
-        fig.add_trace(go.Scatter(
-            x=[f], y=[0.0], mode="markers+text", text=[name], textposition="bottom center",
-            textfont=dict(size=11, color=INK_2), cliponaxis=False,
-            marker=dict(symbol="diamond", size=11, color=INK, line=dict(width=2, color="#fcfcfb")),
-            showlegend=False, hovertemplate=f"<b>{name}</b><br>perfect shape<extra></extra>",
-        ))
-
-    groups = []
-    for r in rows:
-        g = r.get("Group") or ""
-        if g not in groups:
-            groups.append(g)
-    seen = set()
-    for r in rows:
-        y = r.get(y_col, np.nan)
-        if not np.isfinite(y):
-            continue
-        feat = r.get("Feature", "hill")
-        g = r.get("Group") or ""
-        sym = GROUP_SYMBOLS[groups.index(g) % len(GROUP_SYMBOLS)]
-        legend_name = feat + (f" - {g}" if g else "")
-        fig.add_trace(go.Scatter(
-            x=[r["Fullness"]], y=[y * 100.0], mode="markers+text",
-            text=[str(r.get("#", ""))], textposition="middle right",
-            textfont=dict(size=11, color=INK),
-            marker=dict(symbol=sym, size=11, color=FEATURE_COLOURS.get(feat, MUTED),
-                        line=dict(width=2, color="#fcfcfb")),
-            name=legend_name, legendgroup=legend_name, showlegend=legend_name not in seen,
-            customdata=[[r.get("Label", ""), r.get("Shape", ""), r.get("Grade", "")]],
-            hovertemplate=("<b>#%{text} %{customdata[0]}</b><br>%{customdata[1]}<br>"
-                           "fullness %{x:.3f}<br>" + y_col.lower() + " %{y:.2f}% of the box"
-                           "<br>%{customdata[2]}<extra></extra>"),
-        ))
-        seen.add(legend_name)
-
-    if current and np.isfinite(current.get(y_col, np.nan)):
-        fig.add_trace(go.Scatter(
-            x=[current["Fullness"]], y=[current[y_col] * 100.0], mode="markers",
-            marker=dict(symbol="diamond-open", size=16, color=INK, line=dict(width=2.5)),
-            name="profile loaded now",
-            hovertemplate=(f"<b>profile loaded now</b><br>{current.get('Shape', '')}<br>"
-                           "fullness %{x:.3f}<br>%{y:.2f}% of height<extra></extra>"),
-        ))
-
-    ylab = {"Departure": "departure from the best-fitting ideal"}.get(y_col, "departure from a straight cone or V")
-    _layout(fig, "Shape chart", 560)
-    fig.update_layout(margin=dict(l=20, r=20, t=60, b=40),
-                      legend=dict(orientation="h", yanchor="bottom", y=-0.22, xanchor="left", x=0))
-    fig.update_xaxes(title="fullness: share of its box the half profile fills (sagging → full)",
-                     range=[0.0, 1.0])
-    # Room under the floor for the perfect shapes' names, clear of the points.
-    fig.update_yaxes(title=f"{ylab}, % of the box", range=[-0.16 * y_top, y_top],
-                     tickvals=[v for v in np.arange(0.0, y_top + 1e-9, 2.0 if y_top <= 20 else 5.0)])
-    return fig
-
-
-# =====================================================================
-# Layout
-# =====================================================================
-def _pct(v: float, signed: bool = False) -> str:
-    if not np.isfinite(v):
-        return "-"
-    return f"{v * 100:+.1f}%" if signed else f"{v * 100:.1f}%"
-
-
 def to_display_units(item: dict, sx: float, sz: float) -> dict:
     """Positions and elevations back in the file's own units, after a fit done in common units.
 
-    Only the drawing changes: every ratio and departure is dimensionless.
+    Only the drawing changes: every share and departure is dimensionless.
     """
     if not item.get("ok") or (sx == 1.0 and sz == 1.0):
         return item
@@ -350,13 +150,18 @@ def to_display_units(item: dict, sx: float, sz: float) -> dict:
     out["z"] = item["z"] / sz
     m = dict(item["m"])
     for k in ("x_left", "x_right", "x_apex", "width", "x_flat_left", "x_flat_right"):
-        m[k] = m[k] / sx
+        if k in m:
+            m[k] = m[k] / sx
     for k in ("base_elev", "apex_elev", "height", "base_left", "base_right"):
         m[k] = m[k] / sz
     out["m"] = m
     out["halves"] = [dict(h, radius=h["radius"] / sx, base=h["base"] / sz, height=h["height"] / sz)
                      for h in item["halves"]]
     return out
+
+
+def ridge_to_display_units(ridge: dict, sx: float, sz: float) -> dict:
+    return dict(ridge, axis=ridge["axis"] / sx)
 
 
 def default_feature(dataset_type: str, volcano_type: str, long_type: str) -> str:
@@ -367,203 +172,213 @@ def default_feature(dataset_type: str, volcano_type: str, long_type: str) -> str
     return "Valley"
 
 
+# =====================================================================
+# The Ideal Shape tab
+# =====================================================================
 def render_explainer():
-    with st.expander("How the fit works - the fixed procedure", expanded=False):
+    with st.expander("How the departure is found - the one procedure for every landform", expanded=False):
         st.markdown(
             """
 **The idea comes from grain shape.** Wadell fitted a sand grain with a perfect sphere and measured
-the material left over; how far a grain departs from the sphere, and where, records how it has
-been worn. Here the grain is a landform and the sphere is the best-fitting ideal curve.
+the material left over; how far a grain departs from the sphere records how it has been worn. Here
+the grain is a landform and the sphere is the best-fitting ideal curve.
 
-Every profile goes through the same five steps:
+Every landform, of every type and size, goes through the same steps, with no other rules:
 
-1. **Locate.** Find the apex (the summit of a hill, the floor of a valley, the head of a long
-   profile) and the foot of each side (the base of a hill, each rim of a valley, the mouth).
-   Both feet sit at one level, the higher of the two sides' bases, so a volcano on a regional
-   slope is read down to its own foot, not out across the slope. A summit split by a depression
-   (a caldera, or the rift valley of a slow spreading ridge) is read from the middle of the
-   depression, with each side from its own rim. A valley with one rim lower
-   than the other is read up to the lower rim.
-2. **Half profiles.** Split at the apex. Each half is scaled to its own width and its own height,
-   from its own crest (the apex, or its side's caldera rim or rift mountain) down to the foot, so
-   a lopsided feature keeps its shape instead of being averaged. Nothing assumes the two sides
-   are alike.
-3. **Fit four ideal curves to each half.** Each is pinned to the apex and the foot and has one
-   free control, so they compete on equal terms:
-   - **Parabola** (control *k*): every true parabola from the concave one with its vertex at the
-     foot (*k* = 1) through the straight line (*k* = 0) to the dome or U with its vertex at the
-     apex (*k* = -1).
-   - **Exponential** (control *a*): steep at the apex and still sloping at the foot when *a* > 0,
-     like a graded river or the flank of a stratovolcano; straight at *a* = 0, convex below it.
-   - **Circle in true proportions** (control: bulge): a real circular arc, drawn without
-     vertical exaggeration - Wadell's sphere.
-   - **Superellipse** (control *e*): (1 - u^e)^(1/e), for shapes fuller or more sagging than any
-     parabola - the strongly concave cone (e about 0.5), the semicircle (e = 2), the box.
+1. **Frame.** Find the top - the summit of a hill, the floor of a valley (read upside down), the
+   head of a long profile, the spreading axis of a ridge - and the foot on each side. Both feet sit
+   at one base level, the higher of the two sides' lowest ground. Each side goes in a box as wide
+   as that side and as tall as the landform, and the real profile and the ideal are compared in
+   that box, so a 200 m valley and a 5 km volcano are compared at the same scale.
+2. **Ideal.** Down each side runs one smooth curve, held level across the top for as far as fits
+   best (a flat top, or a flat floor). The curve is one of three, each with one bend control:
+   - **parabola**, g = (1 - u)(1 - k u): from concave (k = 1) through straight (k = 0) to a dome (k = -1);
+   - **exponential**, g = (e^(-a u) - e^(-a)) / (1 - e^(-a)): steep at the top and still sloping at
+     the foot when a > 0, like a graded river;
+   - **superellipse**, g = (1 - u^e)^(1/e): deeply concave (e < 1), straight (e = 1), a quarter
+     circle (e = 2), toward a box (e > 2).
 
-   The best member of each family is the one that leaves the least rock out of place.
-4. **Choose, half by half.** On each half, the family that leaves the least rock out of place is
-   that half's ideal, so the two sides of a lopsided feature can take different curves. On a
-   near tie (within 0.1% of the box) the order above wins, parabola first.
-5. **Measure.** Extra rock (blue) and missing rock (red) between the profile and that ideal, as a
-   share of the feature's box (width times height). **Departure** is the two added together.
-   The sign is about rock on a hill and in a valley alike.
+   Here u runs from the top (0) to the foot (1) and g is the height as a share of the ideal's top.
+   The ideal's top height - the same on both sides, anywhere up to the real top - and each side's
+   level stretch, curve and bend are all chosen together to leave the least rock out of place.
+3. **Departure.** The rock out of place - extra rock above the ideal (blue) plus missing rock
+   below it (red) - as a share of the box. **0 means the landform is its ideal**; the further it
+   departs, the bigger the number. It is exactly the quantity the fit makes as small as it can.
+4. **Several transects.** Each transect of a landform goes through steps 1 to 3 and the departures
+   are averaged, with their spread.
 
-**The name** comes from the fitted ideal's fullness - the share of its box it fills: 1/6 strongly
-concave, 1/3 concave parabola, 5/12 gently concave, 1/2 straight, 7/12 gently convex, 2/3
-parabola, 0.79 semicircle, 0.93 box - with a flat top or floor added when one is measured. A
-profile is called straight only when its best parabola has |k| under 0.25.
+**The name** puts the ideal into words: its sides are concave (bowed in), straight or convex
+(bowed out), and "with a flat top" (or floor) is added when its level stretch covers a tenth of the
+width or more. The name never changes the fit or the number.
 
-The departure grades (near-ideal under 1%, slightly modified under 2.5%, modified under 5%,
-strongly modified above) are provisional: they were set from the sample profiles that ship with
-the app, not from a calibrated population.
+**The grades** (near-ideal under 1%, slightly modified under 2.5%, modified under 5%, strongly
+modified above) are provisional: they were set from the sample profiles that ship with the app,
+not from a calibrated population.
             """
         )
 
 
-def ridge_to_display_units(ridge: dict, sx: float, sz: float) -> dict:
-    out = dict(ridge, axis=ridge["axis"] / sx, crest_split=ridge["crest_split"] / sx)
-    for k in ("whole", "axis_hill", "axis_valley"):
-        out[k] = to_display_units(ridge[k], sx, sz)
-    out["axis_item"] = {"axial high": out["axis_hill"], "axial valley": out["axis_valley"]}.get(ridge["axis_type"])
+def _transects_from_table(df: pd.DataFrame, name: str) -> list:
+    """(label, x, z) for every elevation column of a table whose first numeric column is distance."""
+    num = df.apply(pd.to_numeric, errors="coerce").dropna(axis=1, how="all")
+    if num.shape[1] < 2:
+        return []
+    x = num.iloc[:, 0].to_numpy(dtype=float)
+    out = []
+    for col in num.columns[1:]:
+        z = num[col].to_numpy(dtype=float)
+        label = name if num.shape[1] == 2 else f"{name}: {col}"
+        out.append((label, x, z))
     return out
 
 
-def render_ridge_block(ridge: dict, x_label: str, y_label: str):
-    """What the spreading axis is, and the spreading rate it points to."""
-    st.markdown(f"### Spreading axis: {ridge['axis_type']}")
-    it = ridge["axis_item"]
-    win = ideal.RIDGE["axis_window"] / 1000
-    if it is None:
-        st.info(
-            f"Within {win:.0f} km of the axis neither the hill reading nor the valley reading puts its "
-            "apex on the axis, so the axis cannot be classed. Check that the axis is at distance 0, "
-            "or in the middle of the profile, and that distances are in the units chosen above."
-        )
+def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: str, read_file):
+    """Step 4: several transects of one landform, each fitted the same way, then averaged."""
+    st.markdown("#### Several transects of one landform")
+    files = st.file_uploader(
+        "Transect files", type=["csv", "txt", "xlsx"], accept_multiple_files=True,
+        key="ideal_transects",
+        help="One transect per file (distance, elevation), or one distance column followed by "
+             "several elevation columns, one per transect. All are read as the feature and in the "
+             "units chosen above.",
+    )
+    if not files:
+        st.caption("Load two or more transects across the same landform to average their departures.")
         return
-    words = ideal.VOCAB[it["kind"]]
-    other = ridge["axis_valley"] if it is ridge["axis_hill"] else ridge["axis_hill"]
-    other_words = ideal.VOCAB[other["kind"]]
-    st.caption(
-        f"Read as **{ideal.RIDGE_CLASSES[ridge['rate_class']]}** (provisional). The ground within "
-        f"{win:.0f} km of the axis is fitted as a hill and as a valley; the {words['feature']} reading "
-        f"puts its {words['apex']} on the axis"
-        + (f", while the {other_words['feature']} reading puts its {other_words['apex']} "
-           f"{_num(abs(other['m']['x_apex'] - ridge['axis']))} {st.session_state.get('ideal_distance_unit', '')} "
-           "away, on the flank."
-           if other.get("ok") else f"; there is no {other_words['feature']} to read.")
-    )
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"{ridge['axis_type'].capitalize()} relief", _num(it["m"]["height"]),
-              help=f"Height of the axis feature from its {words['apex']} to its {words['foot']}, in "
-                   "the elevation units of the file.")
-    c2.metric("Its fullness", f"{it['fullness']:.3f}",
-              help=f"Axial highs fuller than {ideal.RIDGE['fast_fullness']:.2f} (a low straight to "
-                   "domed rise) read as intermediate, emptier ones (a peaked concave rise) as fast.")
-    c3.metric("Its departure", _pct(it["departure"]))
-    c4.metric("Whole ridge from the cooling curve", _pct(ridge["cooling_departure"]),
-              help="Rock out of place on the whole ridge against depth growing with the square root of "
-                   "age (half-space cooling), g = 1 - sqrt(u), pinned to the same summit and feet.")
-    fig = overlay_figure(it, it["family"], x_label, y_label)
-    fig.add_vline(x=ridge["axis"], line=dict(color=HIGHLIGHT, width=1.5, dash="dash"),
-                  annotation_text="axis", annotation_position="top")
-    fig.update_layout(title=f"The {ridge['axis_type']}: {it['name']}, {ideal.fit_words(it)}")
-    st.plotly_chart(fig, width="stretch")
-    st.caption(
-        "Slow ridges open an axial rift valley between rift mountains; fast ridges build an axial high "
-        "on a broad dome. The class limits were set on 9 real ridges (14 to 145 mm/yr) at about 2 km "
-        "resolution and are provisional. The whole ridge, fitted below, is read out from the axis"
-        + (f"; its crest is split by the rift valley between rift mountains {_num(ridge['crest_split'])} "
-           f"{st.session_state.get('ideal_distance_unit', '')} apart, so the ideal is level across them, "
-           "as across a caldera, and the rock dropped into the valley is missing rock."
-           if ridge["crest_split"] > 0 else ".")
-    )
+    transects = []
+    for f in files:
+        try:
+            transects += _transects_from_table(read_file(f), f.name.rsplit(".", 1)[0])
+        except Exception as e:
+            st.warning(f"{f.name} could not be read: {e}")
+    if not transects:
+        return
+    items = []
+    for label, x, z in transects:
+        it, _ = fit_profile(x * sx, z * sz, feature)
+        items.append((label, to_display_units(it, sx, sz)))
+    avg = ideal.average([it for _, it in items])
+    if avg["n"] == 0:
+        st.warning("None of the transects could be fitted.")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Average departure", _pct(avg["mean"]),
+              help="The mean of the transects' departures. Each is fitted on its own by the same "
+                   "procedure.")
+    c2.metric("Spread", f"± {avg['sd'] * 100:.1f}%",
+              help="Standard deviation of the transects' departures.")
+    c3.metric("Transects", f"{avg['n']}", help=f"Range {_pct(avg['lo'])} to {_pct(avg['hi'])}.")
+    st.caption(f"Grade of the average: **{ideal.departure_class(avg['mean'])}**. Range "
+               f"{_pct(avg['lo'])} to {_pct(avg['hi'])}"
+               + (f"; {avg['failed']} transect(s) could not be fitted." if avg["failed"] else "."))
+    cols = st.columns(2)
+    for i, (label, it) in enumerate(items):
+        with cols[i % 2]:
+            if it.get("ok"):
+                st.plotly_chart(overlay_figure(it, x_label, y_label, f"{label}: {_pct(it['departure'])}",
+                                               height=300, legend=False), width="stretch")
+            else:
+                st.warning(f"{label}: {it.get('problem') or 'could not be fitted.'}")
+    g1, g2 = st.columns([2, 1])
+    with g1:
+        label = st.text_input("Label for the average", value=f"average of {avg['n']} transects",
+                              key="ideal_transect_label")
+    with g2:
+        st.write("")
+        if st.button("Add the average to the shape chart", width="stretch"):
+            kind = FEATURE_CHOICES[feature]
+            _add_rows([{"Label": label, "Group": "", "Feature": ideal.VOCAB[kind]["feature"],
+                        "Shape": f"average of {avg['n']} transects", "Departure": avg["mean"],
+                        "Grade": ideal.departure_class(avg["mean"]), "Spread (sd)": avg["sd"],
+                        "Transects": avg["n"]}])
+            st.success("Added. See the Shape Chart tab.")
 
 
-def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, ridge: dict | None = None):
+def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, ridge: dict | None = None,
+                     feature: str = "", units: tuple = (1.0, 1.0), read_file=None):
     if ridge is not None:
-        render_ridge_block(ridge, x_label, y_label)
-        st.markdown("#### The whole ridge")
+        st.caption(
+            f"Spreading axis: **{ridge['axis_type']}**, read as **{ridge['rate_words']}** "
+            "(provisional). The ridge is framed from its axis; the fit and the departure are the "
+            "same as for any other landform."
+        )
     if not item.get("ok"):
         st.warning(item.get("problem") or "This profile could not be fitted.")
-        render_explainer()
-        return
-
-    kind = item["kind"]
-    words = ideal.VOCAB[kind]
-    fam = item["family"]
-    st.markdown(f"### {item['name'][0].upper() + item['name'][1:]}")
-    st.caption(
-        f"Best-fitting ideal: **{ideal.fit_words(item)}**. Departure {_pct(item['departure'])} "
-        f"of the box, **{item['grade']}**."
-    )
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Departure", _pct(item["departure"]),
-              help="Extra plus missing rock between the profile and the best-fitting ideal, as a "
-                   "share of the feature's width times its height. 0 means the profile IS that ideal.")
-    c2.metric("Net rock", _pct(item["comparisons"][fam]["net"], signed=True),
-              help="Extra minus missing rock against the best-fitting ideal. Positive means more "
-                   "rock than the ideal has.")
-    c3.metric("Fullness", f"{item['fullness']:.3f}",
-              help="Share of its box the profile fills: 0.5 for a cone or V, 0.667 for a parabola.")
-    c4.metric("Departure from straight", _pct(item["comparisons"][ideal.STRAIGHT]["departure"]),
-              help="Against a fixed straight cone or V, for scale: how curved the profile is.")
-
-    pick = st.selectbox(
-        "Compare with", CHOICE_KEYS, index=CHOICE_KEYS.index(fam), format_func=choice_label,
-        key="ideal_compare_with",
-        help="Defaults to the best-fitting ideal. Pick another to see how it fits.",
-    )
-    comp = item["comparisons"][pick]
-    st.plotly_chart(overlay_figure(item, pick, x_label, y_label), width="stretch")
-    z1, z2, z3, z4 = st.columns(4)
-    z1.metric("Extra rock", _pct(comp["excess"]))
-    z2.metric("Missing rock", _pct(comp["deficit"]))
-    z3.metric("Departure", _pct(comp["departure"]))
-    z4.metric("Net", _pct(comp["net"], signed=True))
-    st.markdown(ideal.zone_words(comp))
-    st.caption(choice_note(pick))
-
-    left, right = st.columns([1.35, 1.0], gap="large")
-    with left:
-        st.plotly_chart(half_figure(item, pick), width="stretch")
-    with right:
-        st.plotly_chart(fingerprint_figure(item, pick), width="stretch")
-        rows = []
-        side_name = {"L": "left", "R": "right", "D": "downslope"}
-        best = item["comparisons"][fam]
-        for h in item["halves"]:
-            d = item["by_side"][h["side"]]
-            rows.append({
-                "Half": side_name[h["side"]],
-                "Width": _num(h["radius"]),
-                "Height": _num(h["height"]),
-                "Ideal": ideal.half_words(best["fams"][h["side"]], best["params"][h["side"]]),
-                "Departure": _pct(d["departure"]),
-                "Fullness": f"{d['fullness']:.3f}",
-            })
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-        m = item["m"]
-        facts = [f"{words['feature'].capitalize()} {m['width_height']:.1f} times as wide as it is high."]
-        if kind != ideal.SLOPE:
-            facts.append(f"Asymmetry {m['asymmetry']:.3f} (0 = both halves hold the same area).")
-            if item.get("flat"):
-                facts.append(f"A {words['flat']} across {m['plateau']:.0%} of the width.")
-        st.caption(" ".join(facts))
-
-    for n in item.get("notes", []):
-        st.info(n)
-
-    st.markdown("**Landmark shapes along the form axis**")
-    st.plotly_chart(perfect_shapes_figure(kind), width="stretch")
-    st.caption(
-        "Drawn the way up this feature is, each scaled to the same box. They name the fitted ideal "
-        "by its fullness and sit on the floor of the shape chart."
-    )
+    else:
+        words = ideal.VOCAB[item["kind"]]
+        st.markdown(f"### {item['name'][0].upper() + item['name'][1:]}")
+        c1, c2, c3 = st.columns([1.0, 1.2, 2.2])
+        c1.metric("Departure", _pct(item["departure"]),
+                  help="Rock out of place against the best-fitting ideal - extra plus missing - as a "
+                       "share of the landform's box (width times height). 0 means the profile IS its "
+                       "ideal; the further it departs, the bigger the number.")
+        c2.metric("Grade", item["grade"], help="Provisional: under 1% near-ideal, under 2.5% "
+                                               "slightly modified, under 5% modified.")
+        c3.metric("Extra rock / missing rock", f"{_pct(item['excess'])} / {_pct(item['deficit'])}",
+                  help="The two parts of the departure: rock above the ideal (blue) and rock missing "
+                       "below it (red), each as a share of the box.")
+        st.plotly_chart(overlay_figure(item, x_label, y_label, axis=ridge["axis"] if ridge else None),
+                        width="stretch")
+        st.caption(
+            f"Ideal: {ideal.fit_words(item)}, its top at {item['fit']['top']:.0%} of the height of the "
+            f"{words['feature']}"
+            + (f", level across {item['level']:.0%} of the width" if item["flat"] else "") + "."
+        )
+        for n in item.get("notes", []):
+            st.info(n)
+    if read_file is not None and feature:
+        render_transects(feature, units[0], units[1], x_label, y_label, read_file)
     render_explainer()
 
 
-def _num(v: float) -> str:
-    return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:,.4g}"
+# =====================================================================
+# The Shape Chart tab: landforms ranked by their departure
+# =====================================================================
+def ranking_figure(rows: list, current: dict | None):
+    """Every profile added, ranked by departure from its ideal, lowest at the top."""
+    pts = [dict(r) for r in rows if np.isfinite(r.get("Departure", np.nan))]
+    if current and np.isfinite(current.get("Departure", np.nan)):
+        pts.append(dict(current, Label="profile loaded now", **{"#": "now"}))
+    pts.sort(key=lambda r: r["Departure"])
+    labels = [f"{r.get('#', '')}. {r.get('Label', '')}" if r.get("#") != "now" else "profile loaded now"
+              for r in pts]
+    top = max([0.06] + [r["Departure"] * 1.12 for r in pts]) * 100.0
+    fig = go.Figure()
+    lo = 0.0
+    shades = ["rgba(27,175,122,0.07)", "rgba(237,161,0,0.06)", "rgba(235,104,52,0.06)",
+              "rgba(208,59,59,0.06)"]
+    for i, ((limit, label), shade) in enumerate(zip(ideal.DEPARTURE_CLASSES, shades)):
+        hi = min(limit * 100.0, top)
+        if lo >= top:
+            break
+        # Labels alternate top and bottom, so narrow neighbouring bands stay legible.
+        fig.add_vrect(x0=lo, x1=hi, fillcolor=shade, line_width=0, layer="below",
+                      annotation_text=label, annotation_position="top left" if i % 2 == 0 else "bottom left",
+                      annotation_font=dict(size=11, color=INK_2))
+        lo = hi
+    seen = set()
+    for lab, r in zip(labels, pts):
+        feat = r.get("Feature", "hill")
+        now = r.get("#") == "now"
+        fig.add_trace(go.Scatter(
+            x=[r["Departure"] * 100.0], y=[lab], mode="markers",
+            marker=dict(symbol="diamond-open" if now else "circle", size=14 if now else 11,
+                        color=INK if now else FEATURE_COLOURS.get(feat, MUTED),
+                        line=dict(width=2.5 if now else 2, color=INK if now else "#fcfcfb")),
+            name="profile loaded now" if now else feat,
+            showlegend=(feat not in seen) or now, legendgroup="now" if now else feat,
+            customdata=[[r.get("Shape", ""), r.get("Grade", "")]],
+            hovertemplate=("<b>%{y}</b><br>%{customdata[0]}<br>departure %{x:.2f}% of the box"
+                           "<br>%{customdata[1]}<extra></extra>"),
+        ))
+        if not now:
+            seen.add(feat)
+    _layout(fig, "Landforms ranked by their departure from the ideal", 160 + 28 * max(len(pts), 3))
+    fig.update_layout(margin=dict(l=20, r=20, t=70, b=40),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0))
+    fig.update_xaxes(title="departure, % of the box (0 = the landform is its ideal)", range=[0, top])
+    fig.update_yaxes(autorange="reversed", categoryorder="array", categoryarray=labels)
+    return fig
 
 
 def _add_rows(new_rows: list):
@@ -576,38 +391,32 @@ def _add_rows(new_rows: list):
     st.session_state["ideal_chart_rows"] = rows
 
 
-def measure_samples(sample_files: dict, sample_kind, samples_dir: Path) -> list:
+def measure_samples(sample_files: dict, sample_feature, samples_dir: Path) -> list:
     out = []
     for label, fname in sample_files.items():
         try:
             d = pd.read_csv(samples_dir / fname)
         except Exception:
             continue
-        kind = sample_kind(label)
-        it = ideal.measure(d.iloc[:, 0], d.iloc[:, 1], kind)
+        it, _ = fit_profile(d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float),
+                            sample_feature(label))
         row = ideal.summary_row(it, label.split(": ", 1)[-1], label.split(":", 1)[0])
         if row:
             out.append(row)
     return out
 
 
-def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_kind,
+def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_feature,
                        samples_dir: Path):
     st.markdown(
-        "Profiles organised by their departure from the ideal: across, how full the form is, from "
-        "sagging to box-like; up, how much rock is out of place against the best-fitting ideal. The "
-        "landmark shapes sit on the floor of the chart. This is Powers' roundness chart turned on "
-        "landforms."
+        "Landforms organised by their departure from the ideal, lowest first: a landform that IS its "
+        "ideal sits at 0, and the further it departs, the further right it sits. Every number comes "
+        "from the same procedure, so landforms of any type and size can be compared."
     )
     current = ideal.summary_row(item, "profile loaded now") if item.get("ok") else None
     rows = st.session_state.get("ideal_chart_rows") or []
-
-    view = st.radio("Up the chart", list(CHART_Y), horizontal=True, key="ideal_chart_y")
-    st.plotly_chart(shape_chart_figure(rows, current, CHART_Y[view]), width="stretch")
-    st.caption(
-        "Colour is the feature type and marker shape the group you give a profile. Numbers key the "
-        "points to the table below. The shaded bands are the provisional departure grades."
-    )
+    st.plotly_chart(ranking_figure(rows, current), width="stretch")
+    st.caption("Colour is the feature type. The shaded bands are the provisional grades.")
 
     a1, a2, a3, a4, a5 = st.columns([1.4, 1.1, 0.9, 1.0, 0.7], gap="medium")
     default_label = str(source_name or "").rsplit(".", 1)[0] or f"profile {len(rows) + 1}"
@@ -615,17 +424,16 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
         label = st.text_input("Label", value=default_label, key="ideal_pin_label")
     with a2:
         group = st.text_input("Group (optional)", key="ideal_pin_group",
-                              help="Profiles sharing a group get the same marker shape, e.g. glacial, "
-                                   "fluvial, Mars.")
+                              help="A note kept with the profile in the table, e.g. glacial, fluvial, Mars.")
     with a3:
         if st.button("Add this profile", width="stretch", disabled=current is None):
             _add_rows([ideal.summary_row(item, label or default_label, group)])
             st.rerun()
     with a4:
         if st.button("Add all samples", width="stretch",
-                     help="Fit every sample profile that ships with the app and put it on the chart."):
+                     help="Fit every sample profile that ships with the app and add it to the chart."):
             have = {(r.get("Label"), r.get("Group")) for r in rows}
-            new = [r for r in measure_samples(sample_files, sample_kind, samples_dir)
+            new = [r for r in measure_samples(sample_files, sample_feature, samples_dir)
                    if (r["Label"], r["Group"]) not in have]
             _add_rows(new)
             st.rerun()
@@ -635,13 +443,10 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
             st.rerun()
 
     if rows:
-        df = pd.DataFrame(rows)
-        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Best-fitting ideal", "Departure",
-                     "Grade", "Net rock", "Fullness"]
+        df = pd.DataFrame(rows).sort_values("Departure")
+        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Departure", "Grade"]
         show = df[[c for c in show_cols if c in df.columns]].copy()
         show["Departure"] = show["Departure"].map(lambda v: _pct(v))
-        show["Net rock"] = show["Net rock"].map(lambda v: _pct(v, signed=True))
-        show["Fullness"] = show["Fullness"].map(lambda v: f"{v:.3f}")
         st.dataframe(show, width="stretch", hide_index=True)
         st.download_button(
             "Shape chart CSV (all columns)",
@@ -651,4 +456,4 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
         )
     else:
         st.caption("Add the profile loaded now, or press Add all samples to see the sample profiles "
-                   "organised on the chart.")
+                   "ranked.")

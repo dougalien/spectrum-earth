@@ -1719,6 +1719,16 @@ SAMPLE_FILES = {   # synthetic profiles in samples/; the Dataset Type each one s
     "Real volcano: Piton de la Fournaise, shield": "sample_real_volcano_pitondelafournaise_shield.csv",
     "Real volcano: Newberry, broad with caldera": "sample_real_volcano_newberry_broad_with_caldera.csv",
     "Real volcano: Crater Lake, caldera": "sample_real_volcano_craterlake_caldera.csv",
+    # Real mid-ocean ridge cross-sections, ETOPO1 swath medians centred on the axis (README)
+    "Real ridge: SW Indian Ridge 10°E, ultraslow (14 mm/yr)": "sample_real_ridge_swir_10e_ultraslow.csv",
+    "Real ridge: Mohns Ridge 72°N, ultraslow (16 mm/yr)": "sample_real_ridge_mohns_72n_ultraslow.csv",
+    "Real ridge: Mid-Atlantic Ridge 26°N, slow (25 mm/yr)": "sample_real_ridge_mar_26n_slow.csv",
+    "Real ridge: Mid-Atlantic Ridge 29°N, slow (24 mm/yr)": "sample_real_ridge_mar_29n_slow.csv",
+    "Real ridge: Juan de Fuca 45°N, intermediate (56 mm/yr)": "sample_real_ridge_juandefuca_45n_intermediate.csv",
+    "Real ridge: SE Indian Ridge 98°E, intermediate (70 mm/yr)": "sample_real_ridge_seir_98e_intermediate.csv",
+    "Real ridge: East Pacific Rise 12.5°N, fast (90 mm/yr)": "sample_real_ridge_epr_12n_fast.csv",
+    "Real ridge: East Pacific Rise 9.5°N, fast (110 mm/yr)": "sample_real_ridge_epr_9n_fast.csv",
+    "Real ridge: East Pacific Rise 17.5°S, superfast (145 mm/yr)": "sample_real_ridge_epr_17s_superfast.csv",
 }
 
 
@@ -1731,11 +1741,20 @@ def sample_dataset_type(label: str) -> str:
     return TOPO_TRANSECT
 
 
+def sample_feature(label: str) -> str:
+    """The 'What is the feature?' choice a sample profile suits."""
+    if label.startswith("Real ridge"):
+        return ideal_view.RIDGE_FEATURE
+    return ideal_view.default_feature(sample_dataset_type(label), TOPO_VOLCANO, TOPO_LONG_PROFILE)
+
+
 def on_sample_change():
     choice = st.session_state.sample_choice
     if choice != "None":
         st.session_state.dataset_type = sample_dataset_type(choice)
         apply_dataset_preset(st.session_state.dataset_type)
+        # The feature choice follows the sample (a ridge and a valley are both transects).
+        st.session_state[f"ideal_feature_{st.session_state.dataset_type}"] = sample_feature(choice)
 
 
 def read_uploaded_file(uploaded_file):
@@ -3202,11 +3221,16 @@ with control_ideal:
     st.markdown("**Ideal shape fit**")
     _feature_names = list(ideal_view.FEATURE_CHOICES)
     _feature_default = ideal_view.default_feature(st.session_state.dataset_type, TOPO_VOLCANO, TOPO_LONG_PROFILE)
+    _feature_key = f"ideal_feature_{st.session_state.dataset_type}"
+    if _feature_key not in st.session_state:
+        st.session_state[_feature_key] = _feature_default
     ideal_feature = st.radio(
-        "What is the feature?", _feature_names, index=_feature_names.index(_feature_default),
-        horizontal=True, key=f"ideal_feature_{st.session_state.dataset_type}",
+        "What is the feature?", _feature_names,
+        horizontal=True, key=_feature_key,
         help="A valley is fitted from its floor up to each rim, a hill from its summit down to each "
-             "foot, and a long profile as one slope from its head to its mouth.",
+             "foot, and a long profile as one slope from its head to its mouth. A spreading ridge is "
+             "fitted whole as a hill and read again at its axis (distance 0, or the middle of the "
+             "profile) to tell an axial valley from an axial high.",
     )
     _u1, _u2, _u3 = st.columns([1.0, 1.0, 1.0], gap="small")
     with _u1:
@@ -3467,16 +3491,19 @@ raw_y = y.copy()
 # units. It resamples and smooths at the scale of the feature itself, so the
 # display settings for the other analyses cannot change it.
 _kind = ideal_view.FEATURE_CHOICES[ideal_feature]
-ideal_item = ideal_shape.measure(
-    raw_x * ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit],
-    raw_y * ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit],
-    _kind,
-)
+_sx = ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit]
+_sz = ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit]
+ridge_reading = None
+if ideal_feature == ideal_view.RIDGE_FEATURE:
+    ridge_reading = ideal_shape.read_ridge(raw_x * _sx, raw_y * _sz)
+    ideal_item = ridge_reading["whole"]
+else:
+    ideal_item = ideal_shape.measure(raw_x * _sx, raw_y * _sz, _kind)
 if ideal_item.get("ok"):
     # Draw in the file's own units.
-    _sx = ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit]
-    _sz = ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit]
     ideal_item = ideal_view.to_display_units(ideal_item, _sx, _sz)
+if ridge_reading is not None:
+    ridge_reading = ideal_view.ridge_to_display_units(ridge_reading, _sx, _sz)
 
 st.session_state.status_notes = []
 if st.session_state.normalize:
@@ -3674,14 +3701,13 @@ main_tabs = st.tabs(["Ideal Shape", "Shape Chart", "Other analyses"])
 with main_tabs[0]:
     ideal_view.render_ideal_tab(
         ideal_item, st.session_state.x_label, st.session_state.y_label,
-        st.session_state.get("source_name", ""),
+        st.session_state.get("source_name", ""), ridge=ridge_reading,
     )
 
 with main_tabs[1]:
     ideal_view.render_shape_chart(
         ideal_item, st.session_state.get("source_name", ""), SAMPLE_FILES,
-        lambda label: ideal_view.FEATURE_CHOICES[ideal_view.default_feature(
-            sample_dataset_type(label), TOPO_VOLCANO, TOPO_LONG_PROFILE)],
+        lambda label: ideal_view.FEATURE_CHOICES[sample_feature(label)],
         Path(__file__).resolve().parent / "samples",
     )
 

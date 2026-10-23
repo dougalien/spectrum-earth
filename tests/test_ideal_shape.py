@@ -55,16 +55,31 @@ def straight_departure(item):
     return I.compare(item["halves"], straight, item["kind"])["departure"]
 
 
-def sample(path):
-    d = pd.read_csv(path)
-    x, z = d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float)
-    if "ridge" in path.name:
+LIBRARY = ROOT / "samples" / "library"
+FEATURES = pd.read_csv(LIBRARY / "features.csv")
+KIND = {"volcano": I.HILL, "valley": I.VALLEY}
+
+
+def transect(fid, column=None):
+    """(x, z) of one library transect; the first one when no column is named."""
+    d = pd.read_csv(LIBRARY / f"{fid}.csv")
+    col = column or d.columns[1]
+    return d.iloc[:, 0].to_numpy(dtype=float), d[col].to_numpy(dtype=float)
+
+
+def library_transects():
+    out = []
+    for f in FEATURES.itertuples():
+        for col in pd.read_csv(LIBRARY / f"{f.id}.csv", nrows=0).columns[1:]:
+            out.append(pytest.param(f.id, f.feature, col, id=f"{f.id}-{col}"))
+    return out
+
+
+def measure_transect(fid, feature, col):
+    x, z = transect(fid, col)
+    if feature == "ridge":
         return I.read_ridge(x, z)["whole"]
-    kind = I.SLOPE if "longprofile" in path.name else I.VALLEY if "transect" in path.name else I.HILL
-    return I.measure(x, z, kind)
-
-
-SAMPLES = [p for p in sorted((ROOT / "samples").glob("sample_*.csv")) if "landform_reference" not in p.name]
+    return I.measure(x, z, KIND[feature])
 
 
 @pytest.mark.parametrize("k", [-1.0, -0.5, 0.0, 0.5, 1.0])
@@ -218,8 +233,7 @@ def test_summit_at_the_end_is_refused():
 # ---------------------------------------------------------------------
 def test_the_departure_does_not_depend_on_size():
     """The same landform drawn bigger, wider or taller gets the same number."""
-    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_taranaki_stratovolcano.csv")
-    x, z = d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float)
+    x, z = transect("taranaki")
     base = I.measure(x, z, I.HILL)["departure"]
     for sx, sz in ((10.0, 1.0), (1.0, 0.1), (0.003, 7.0)):
         assert I.measure(x * sx, z * sz + 500.0, I.HILL)["departure"] == pytest.approx(base, abs=1e-6)
@@ -227,8 +241,7 @@ def test_the_departure_does_not_depend_on_size():
 
 def test_the_departure_is_the_least_rock_out_of_place():
     """Nudging the fitted top, level stretch or bend never leaves less rock out of place."""
-    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_newberry_broad_with_caldera.csv")
-    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
+    item = I.measure(*transect("fournaise"), I.HILL)
     fit, halves = item["fit"], item["halves"]
     assert I._out_of_place(halves, fit["top"], fit["sides"]) == pytest.approx(item["departure"], abs=1e-9)
     rng = np.random.default_rng(0)
@@ -241,8 +254,7 @@ def test_the_departure_is_the_least_rock_out_of_place():
 
 def test_a_caldera_gets_one_level_top_not_a_staircase():
     """Crater Lake: one ideal, level across the caldera at one height on both sides."""
-    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_craterlake_caldera.csv")
-    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
+    item = I.measure(*transect("craterlake"), I.HILL)
     left, right = item["halves"]
     assert left["height"] == right["height"]
     assert item["ideal"]["L"][0] == pytest.approx(item["ideal"]["R"][0])
@@ -259,15 +271,24 @@ def test_a_spike_on_a_broad_rise_is_extra_rock_not_the_top_of_the_ideal():
     assert item["excess"] > item["deficit"]
 
 
-@pytest.mark.parametrize("path", SAMPLES, ids=lambda p: p.stem)
-def test_every_sample_profile_measures(path):
-    item = sample(path)
+@pytest.mark.parametrize("fid, feature, col", library_transects())
+def test_every_library_transect_measures(fid, feature, col):
+    item = measure_transect(fid, feature, col)
     assert item["ok"], item["problem"]
     assert np.isfinite(item["departure"])
     # The ideal never stands above the real top, and is never worse than a straight cone or V.
     assert 0.0 < item["fit"]["top"] <= 1.0
     assert item["departure"] <= straight_departure(item) + 1e-9
-    assert I.summary_row(item, path.stem)
+    assert I.summary_row(item, fid)
+
+
+def test_the_library_has_ten_of_each_and_every_transect_is_placed():
+    assert FEATURES.feature.value_counts().to_dict() == {"volcano": 10, "valley": 10, "ridge": 10}
+    placed = pd.read_csv(LIBRARY / "transects.csv")
+    for f in FEATURES.itertuples():
+        cols = list(pd.read_csv(LIBRARY / f"{f.id}.csv", nrows=0).columns[1:])
+        assert len(cols) >= 3
+        assert sorted(placed[placed.feature_id == f.id].column) == sorted(cols)
 
 
 def test_transects_are_averaged():
@@ -287,15 +308,18 @@ def test_transects_are_averaged():
 # ---------------------------------------------------------------------
 # Spreading ridges
 # ---------------------------------------------------------------------
-RIDGE_CLASS = {"ultraslow": "slow", "slow": "slow", "intermediate": "intermediate", "fast": "fast",
-               "superfast": "fast"}
+
+RIDGES = [p for p in library_transects() if p.values[1] == "ridge"]
 
 
-@pytest.mark.parametrize("path", sorted((ROOT / "samples").glob("sample_real_ridge_*.csv")), ids=lambda p: p.stem)
-def test_each_real_ridge_reads_as_its_spreading_rate(path):
-    d = pd.read_csv(path)
-    r = I.read_ridge(d.iloc[:, 0], d.iloc[:, 1])
-    assert r["rate_class"] == RIDGE_CLASS[path.stem.rsplit("_", 1)[-1]]
+@pytest.mark.parametrize("fid, feature, col", RIDGES)
+def test_each_real_ridge_reads_as_its_spreading_rate(fid, feature, col):
+    """Every transect of every library ridge, against its MORVEL full rate."""
+    rate = float(FEATURES.set_index("id").loc[fid, "full_rate_mm_yr"])
+    expected = "slow" if rate < 40 else "intermediate" if rate < 80 else "fast"
+    x, z = transect(fid, col)
+    r = I.read_ridge(x, z)
+    assert r["rate_class"] == expected
     assert r["axis_type"] == ("axial valley" if r["rate_class"] == "slow" else "axial high")
     assert r["whole"]["ok"]
     # The whole ridge is framed from the axis, down both flanks.
@@ -337,7 +361,7 @@ def test_each_half_takes_its_own_family():
 
 def test_real_transects_of_one_volcano_are_averaged():
     """Four transects through the summit of Mount Fuji, each fitted the same way."""
-    df = pd.read_csv(ROOT / "samples" / "transects_real_fuji_four_azimuths.csv")
+    df = pd.read_csv(LIBRARY / "fuji.csv")
     avg = I.average([I.measure(df.iloc[:, 0], df[c], I.HILL) for c in df.columns[1:]])
     assert avg["n"] == 4 and avg["failed"] == 0
     assert avg["lo"] < avg["mean"] < avg["hi"] < 0.025

@@ -40,6 +40,20 @@ FEATURE_CHOICES = {
 }
 RIDGE_FEATURE = "Spreading ridge"
 
+DATASETS = {
+    "Copernicus DEM GLO-30": (
+        "Copernicus DEM GLO-30, 1 arc-second (about 30 m), read from the public copy on AWS "
+        "(s3://copernicus-dem-30m). © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH "
+        "2014-2018, provided under COPERNICUS by the European Union and ESA. "
+        "doi:10.5270/ESA-c5d3d65"),
+    "ETOPO1": (
+        "ETOPO1 1 arc-minute global relief model (Amante and Eakins, 2009, NOAA Technical "
+        "Memorandum NESDIS NGDC-24, doi:10.7289/V5C8276M), read from the AWS Terrain Tiles "
+        "(s3://elevation-tiles-prod); each point is the median of 7 parallel lines across 30 km."),
+}
+RATE_SOURCE = ("Full spreading rates are approximate, from the MORVEL plate motion model "
+               "(DeMets, Gordon and Argus, 2010, Geophysical Journal International 181, 1-80).")
+
 DISTANCE_UNITS = {"metres": 1.0, "kilometres": 1000.0, "feet": 0.3048, "miles": 1609.344}
 ELEVATION_UNITS = {"metres": 1.0, "feet": 0.3048, "kilometres": 1000.0}
 
@@ -51,6 +65,40 @@ def fit_profile(x: np.ndarray, z: np.ndarray, feature: str) -> tuple[dict, dict 
         ridge = ideal.read_ridge(x, z)
         return ridge["whole"], ridge
     return ideal.measure(x, z, FEATURE_CHOICES[feature]), None
+
+
+def load_library(folder: Path) -> dict:
+    """The real transect library: {menu label: feature row with its transects}, in file order."""
+    try:
+        feats = pd.read_csv(folder / "features.csv")
+        trans = pd.read_csv(folder / "transects.csv")
+    except Exception:
+        return {}
+    out = {}
+    for f in feats.to_dict("records"):
+        kind = {"volcano": "Volcano", "valley": "Valley", "ridge": "Ridge"}[f["feature"]]
+        label = f"{kind}: {f['name']}, {f['place']}"
+        if f["feature"] == "ridge":
+            label = f"{kind}: {f['name']}, {f['notes'].rstrip('.').lower()} ({f['full_rate_mm_yr']:.0f} mm/yr)"
+        f["transects"] = trans[trans.feature_id == f["id"]].to_dict("records")
+        out[label] = f
+    return out
+
+
+def library_citation(entry: dict) -> str:
+    """Where a library feature's transects come from, in words."""
+    t = entry["transects"]
+    dataset = DATASETS["ETOPO1" if entry["feature"] == "ridge" else "Copernicus DEM GLO-30"]
+    placed = "; ".join(
+        f"{r['column']} through {r['centre_lat']:.4f}, {r['centre_lon']:.4f} at {r['azimuth_deg']:.0f}°"
+        for r in t)
+    lines = [f"**{entry['name']}**, {entry['place']}. {entry['notes']}",
+             f"{len(t)} transects, each {2 * entry['half_km']:g} km long (centre latitude, longitude and "
+             f"azimuth): {placed}.",
+             f"Data: {dataset}"]
+    if entry["feature"] == "ridge":
+        lines.append(f"Full spreading rate about {entry['full_rate_mm_yr']:.0f} mm/yr. {RATE_SOURCE}")
+    return "  \n".join(lines)
 
 
 def _layout(fig, title: str, height: int, **kw):
@@ -212,7 +260,7 @@ Every landform, of every type and size, goes through the same steps, with no oth
 width or more. The name never changes the fit or the number.
 
 **The grades** (near-ideal under 1%, slightly modified under 2.5%, modified under 5%, strongly
-modified above) are provisional: they were set from the sample profiles that ship with the app,
+modified above) are provisional: they were set from a few profiles before the real library was added,
 not from a calibrated population.
             """
         )
@@ -232,9 +280,18 @@ def _transects_from_table(df: pd.DataFrame, name: str) -> list:
     return out
 
 
-def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: str, read_file):
-    """Step 4: several transects of one landform, each fitted the same way, then averaged."""
+def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: str, read_file,
+                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None):
+    """Step 4: several transects of one landform, each fitted the same way, then averaged.
+
+    A landform from the library brings all its transects with it; otherwise they are uploaded.
+    """
     st.markdown("#### Several transects of one landform")
+    if library_entry is not None and library_table is not None:
+        transects = _transects_from_table(library_table, library_entry["name"])
+        st.caption(library_citation(library_entry))
+        _render_transect_average(transects, feature, sx, sz, x_label, y_label, library_entry["name"])
+        return
     files = st.file_uploader(
         "Transect files", type=["csv", "txt", "xlsx"], accept_multiple_files=True,
         key="ideal_transects",
@@ -251,6 +308,11 @@ def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: 
             transects += _transects_from_table(read_file(f), f.name.rsplit(".", 1)[0])
         except Exception as e:
             st.warning(f"{f.name} could not be read: {e}")
+    _render_transect_average(transects, feature, sx, sz, x_label, y_label, "")
+
+
+def _render_transect_average(transects: list, feature: str, sx: float, sz: float, x_label: str,
+                             y_label: str, name: str):
     if not transects:
         return
     items = []
@@ -281,7 +343,7 @@ def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: 
                 st.warning(f"{label}: {it.get('problem') or 'could not be fitted.'}")
     g1, g2 = st.columns([2, 1])
     with g1:
-        label = st.text_input("Label for the average", value=f"average of {avg['n']} transects",
+        label = st.text_input("Label for the average", value=name or f"average of {avg['n']} transects",
                               key="ideal_transect_label")
     with g2:
         st.write("")
@@ -295,7 +357,8 @@ def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: 
 
 
 def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, ridge: dict | None = None,
-                     feature: str = "", units: tuple = (1.0, 1.0), read_file=None):
+                     feature: str = "", units: tuple = (1.0, 1.0), read_file=None,
+                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None):
     if ridge is not None:
         st.caption(
             f"Spreading axis: **{ridge['axis_type']}**, read as **{ridge['rate_words']}** "
@@ -327,7 +390,8 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, r
         for n in item.get("notes", []):
             st.info(n)
     if read_file is not None and feature:
-        render_transects(feature, units[0], units[1], x_label, y_label, read_file)
+        render_transects(feature, units[0], units[1], x_label, y_label, read_file,
+                         library_entry, library_table)
     render_explainer()
 
 
@@ -391,23 +455,29 @@ def _add_rows(new_rows: list):
     st.session_state["ideal_chart_rows"] = rows
 
 
-def measure_samples(sample_files: dict, sample_feature, samples_dir: Path) -> list:
+def measure_library(library: dict, sample_feature, library_dir: Path) -> list:
+    """One shape-chart row per library landform: the average of its transects."""
     out = []
-    for label, fname in sample_files.items():
+    for label, entry in library.items():
         try:
-            d = pd.read_csv(samples_dir / fname)
+            table = pd.read_csv(library_dir / f"{entry['id']}.csv")
         except Exception:
             continue
-        it, _ = fit_profile(d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float),
-                            sample_feature(label))
-        row = ideal.summary_row(it, label.split(": ", 1)[-1], label.split(":", 1)[0])
-        if row:
-            out.append(row)
+        feature = sample_feature(label)
+        items = [fit_profile(x, z, feature)[0] for _, x, z in _transects_from_table(table, entry["name"])]
+        avg = ideal.average(items)
+        if avg["n"] == 0:
+            continue
+        kind = FEATURE_CHOICES[feature]
+        out.append({"Label": entry["name"], "Group": entry["feature"], "Feature": ideal.VOCAB[kind]["feature"],
+                    "Shape": f"average of {avg['n']} transects", "Departure": avg["mean"],
+                    "Grade": ideal.departure_class(avg["mean"]), "Spread (sd)": avg["sd"],
+                    "Transects": avg["n"]})
     return out
 
 
-def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_feature,
-                       samples_dir: Path):
+def render_shape_chart(item: dict, source_name: str, library: dict, sample_feature,
+                       library_dir: Path):
     st.markdown(
         "Landforms organised by their departure from the ideal, lowest first: a landform that IS its "
         "ideal sits at 0, and the further it departs, the further right it sits. Every number comes "
@@ -430,10 +500,11 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
             _add_rows([ideal.summary_row(item, label or default_label, group)])
             st.rerun()
     with a4:
-        if st.button("Add all samples", width="stretch",
-                     help="Fit every sample profile that ships with the app and add it to the chart."):
+        if st.button("Add the library", width="stretch",
+                     help="Fit every transect of every real landform in the library and add each "
+                          "landform's average to the chart."):
             have = {(r.get("Label"), r.get("Group")) for r in rows}
-            new = [r for r in measure_samples(sample_files, sample_feature, samples_dir)
+            new = [r for r in measure_library(library, sample_feature, library_dir)
                    if (r["Label"], r["Group"]) not in have]
             _add_rows(new)
             st.rerun()
@@ -444,9 +515,11 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
 
     if rows:
         df = pd.DataFrame(rows).sort_values("Departure")
-        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Departure", "Grade"]
+        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Departure", "Spread (sd)", "Grade"]
         show = df[[c for c in show_cols if c in df.columns]].copy()
         show["Departure"] = show["Departure"].map(lambda v: _pct(v))
+        if "Spread (sd)" in show:
+            show["Spread (sd)"] = show["Spread (sd)"].map(lambda v: f"± {v * 100:.1f}%" if np.isfinite(v) else "")
         st.dataframe(show, width="stretch", hide_index=True)
         st.download_button(
             "Shape chart CSV (all columns)",
@@ -455,5 +528,5 @@ def render_shape_chart(item: dict, source_name: str, sample_files: dict, sample_
             mime="text/csv",
         )
     else:
-        st.caption("Add the profile loaded now, or press Add all samples to see the sample profiles "
-                   "ranked.")
+        st.caption("Add the profile loaded now, or press Add the library to see the 30 real "
+                   "landforms ranked.")

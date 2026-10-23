@@ -1,0 +1,101 @@
+feature_id,column,centre_lon,centre_lat,azimuth_deg,half_km,step_m,dataset
+fuji,az000,138.7274,35.3606,0.0,22.0,110.0,Copernicus DEM GLO-30
+fuji,az045,138.7274,35.3606,45.0,22.0,110.0,Copernicus DEM GLO-30
+fuji,az090,138.7274,35.3606,90.0,22.0,110.0,Copernicus DEM GLO-30
+fuji,az135,138.7274,35.3606,135.0,22.0,110.0,Copernicus DEM GLO-30
+mayon,az000,123.68599,13.25597,0.0,11.0,55.0,Copernicus DEM GLO-30
+mayon,az045,123.68599,13.25597,45.0,11.0,55.0,Copernicus DEM GLO-30
+mayon,az090,123.68599,13.25597,90.0,11.0,55.0,Copernicus DEM GLO-30
+mayon,az135,123.68599,13.25597,135.0,11.0,55.0,Copernicus DEM GLO-30
+taranaki,az000,174.0634,-39.2963,0.0,14.0,70.0,Copernicus DEM GLO-30
+taranaki,az045,174.0634,-39.2963,45.0,14.0,70.0,Copernicus DEM GLO-30
+taranaki,az090,174.0634,-39.2963,90.0,14.0,70.0,Copernicus DEM GLO-30
+taranaki,az135,174.0634,-39.2963,135.0,14.0,70.0,Copernicus DEM GLO-30
+shishaldin,az000,-163.9711,54.7554,0.0,15.0,75.0,Copernicus DEM GLO-30
+shishaldin,az045,-163.9711,54.7554,45.0,15.0,75.0,Copernicus DEM GLO-30
+shishaldin,az090,-163.9711,54.7554,90.0,15.0,75.0,Copernicus DEM GLO-30
+shishaldin,az135,-163.9711,54.7554,135.0,15.0,75.0,Copernicus DEM GLO-30
+rainier,az000,-121.7603,46.8528,0.0,20.0,100.0,Copernicus DEM GLO-30
+rainier,az045,-121.7603,46.8528,45.0,20.0,100.0,Copernicus DEM GLO-30
+rainier,az090,-121.7603,46.8528,90.0,20.0,100.0,Copernicus DEM GLO-30
+rainier,az135,-121.7603,46.8528,135.0,20.0,100.0,Copernicus DEM GLO-30
+kilimanjaro,az000,37.35252,-3.07585,0.0,40.0,200.0,Copernicus DEM GLO-30
+kilimanjaro,az045,37.35252,-3.07585,45.0,40.0,200.0,Copernicus DEM GLO-30
+kilimanjaro,az090,37.35252,-3.07585,90.0,40.0,200.0,Copernicus DEM GLO-30
+kilimanjaro,az135,37.35252,-3.07585,135.0,40.0,200.0,Copernicus DEM GLO-30
+etna,az000,14.99515,37.7548,0.0,25.0,125.0,Copernicus DEM GLO-30
+etna,az045,14.99515,37.7548,45.0,25.0,125.0,Copernicus DEM GLO-30
+etna,az090,14.99515,37.7548,90.0,25.0,125.0,Copernicus DEM GLO-30
+etna,az135,14.99515,37.7548,135.0,25.0,125.0,Copernicus DEM GLO-30
+maunakea,az000,-155.46953,19.82304,0.0,40.0,200.0,Copernicus DEM GLO-30
+maunakea,az045,-155.46953,19.82304,45.0,40.0,200.0,Copernicus DEM GLO-30
+maunakea,az090,-155.46953,19.82304,90.0,40.0,200.0,Copernicus DEM GLO-30
+maunakea,az135,-155.46953,19.82304,135.0,40.0,200.0,Copernicus DEM GLO-30
+fournaise,az000,55.7083,-21.24305,0.0,14.0,70.0,Copernicus DEM GLO-30
+fournaise,az045,55.7083,-21.24305,45.0,14.0,70.0,Copernicus DEM GLO-30
+fournaise,az090,55.7083,-21.24305,90.0,14.0,70.0,Copernicus DEM GLO-30
+fournaise,az135,55.7083,-21.24305,135.0,14.0,70.0,Copernicus DEM GLO-30
+craterlake,az000,-122.109,42.9446,0.0,16.0,80.0,Copernicus DEM GLO-30
+craterlake,az045,-122.109,42.9446,45.0,16.0,80.0,Copernicus DEM GLO-30
+craterlake,az090,-122.109,42.9446,90.0,16.0,80.0,Copernicus DEM GLO-30
+craterlake,az135,-122.109,42.9446,135.0,16.0,80.0,Copernicus DEM GLO-30
+yosemite,west_az170,-119.63291,37.72161,170.0,3.5,17.5,Copernicus DEM GLO-30
+yosemite,mid_az160,-119.60528,37.73562,160.0,3.5,17.5,Copernicus DEM GLO-30
+yosemite,east_az170,-119.58529,37.74329,170.0,3.5,17.5,Copernicus DEM GLO-30
+lauterbrunnen,south_az090,7.90506,46.56,90.0,3.0,15.0,Copernicus DEM GLO-30
+lauterbrunnen,mid_az095,7.91128,46.57986,95.0,3.0,15.0,Copernicus DEM GLO-30
+lauterbrunnen,north_az090,7.90827,46.598,90.0,3.0,15.0,Copernicus DEM GLO-30
+kingscanyon,west_az000,-118.66,36.78755,0.0,4.0,20.0,Copernicus DEM GLO-30
+kingscanyon,mid_az000,-118.645,36.78505,0.0,4.0,20.0,Copernicus DEM GLO-30
+kingscanyon,east_az000,-118.595,36.7914,0.0,4.0,20.0,Copernicus DEM GLO-30
+nantffrancon,south_az060,-4.035,53.14173,60.0,2.5,12.5,Copernicus DEM GLO-30
+nantffrancon,mid_az060,-4.04462,53.15117,60.0,2.5,12.5,Copernicus DEM GLO-30
+nantffrancon,north_az060,-4.05059,53.16187,60.0,2.5,12.5,Copernicus DEM GLO-30
+langdale,west_az005,-3.11003,54.44381,5.0,2.5,12.5,Copernicus DEM GLO-30
+langdale,mid_az005,-3.08944,54.44673,5.0,2.5,12.5,Copernicus DEM GLO-30
+langdale,east_az005,-3.06944,54.44473,5.0,2.5,12.5,Copernicus DEM GLO-30
+grandcanyon,west_az000,-112.16,36.10405,0.0,12.0,60.0,Copernicus DEM GLO-30
+grandcanyon,mid_az020,-112.09952,36.09906,20.0,12.0,60.0,Copernicus DEM GLO-30
+grandcanyon,east_az030,-112.03541,36.08143,30.0,12.0,60.0,Copernicus DEM GLO-30
+blackcanyon,west_az000,-107.75,38.57549,0.0,2.5,12.5,Copernicus DEM GLO-30
+blackcanyon,mid_az165,-107.73726,38.57583,165.0,2.5,12.5,Copernicus DEM GLO-30
+blackcanyon,east_az155,-107.72458,38.58162,155.0,2.5,12.5,Copernicus DEM GLO-30
+hellscanyon,south_az115,-116.66667,45.33219,115.0,12.0,60.0,Copernicus DEM GLO-30
+hellscanyon,mid_az120,-116.6356,45.37346,120.0,12.0,60.0,Copernicus DEM GLO-30
+hellscanyon,north_az115,-116.59045,45.43753,115.0,12.0,60.0,Copernicus DEM GLO-30
+colca,west_az170,-71.96105,-15.59424,170.0,8.0,40.0,Copernicus DEM GLO-30
+colca,mid_az000,-71.935,-15.59902,0.0,8.0,40.0,Copernicus DEM GLO-30
+colca,east_az000,-71.905,-15.60092,0.0,8.0,40.0,Copernicus DEM GLO-30
+rhinegorge,south_az090,7.74005,50.128,90.0,2.5,12.5,Copernicus DEM GLO-30
+rhinegorge,mid_az060,7.72594,50.13813,60.0,2.5,12.5,Copernicus DEM GLO-30
+rhinegorge,north_az050,7.72,50.15,50.0,2.5,12.5,Copernicus DEM GLO-30
+swir10e,along-20km,9.9871,-52.8756,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+swir10e,along0km,9.743,-52.979,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+swir10e,along+20km,9.4977,-53.0819,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mohns72n,along-20km,2.2343,72.5126,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mohns72n,along0km,1.744,72.41,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mohns72n,along+20km,1.2592,72.3062,145.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar23n,along-20km,-44.8679,23.5191,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar23n,along0km,-44.902,23.342,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar23n,along+20km,-44.936,23.1649,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar26n,along-20km,-44.7981,26.3037,105.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar26n,along0km,-44.85,26.13,105.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar26n,along+20km,-44.9018,25.9563,105.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar29n,along-20km,-43.1242,29.3451,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar29n,along0km,-43.16,29.168,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+mar29n,along+20km,-43.1957,28.9909,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+jdf45n,along-20km,-130.1123,45.469,110.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+jdf45n,along0km,-130.2,45.3,110.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+jdf45n,along+20km,-130.2872,45.1309,110.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+seir98e,along-20km,97.4266,-47.3766,39.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+seir98e,along0km,97.633,-47.49,39.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+seir98e,along+20km,97.8403,-47.603,39.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr12n,along-20km,-103.9201,12.6832,85.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr12n,along0km,-103.904,12.504,85.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr12n,along+20km,-103.888,12.3248,85.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr9n,along-20km,-104.244,9.6799,90.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr9n,along0km,-104.244,9.5,90.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr9n,along+20km,-104.244,9.3201,90.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr17s,along-20km,-113.1563,-17.3419,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr17s,along0km,-113.189,-17.519,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"
+epr17s,along+20km,-113.2218,-17.6961,100.0,200.0,1000.0,"ETOPO1 (AWS Terrain Tiles), median of 7 lines over 30 km"

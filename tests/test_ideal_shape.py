@@ -1,4 +1,5 @@
-"""Checks that the fixed fitting procedure recovers the ideal curves it is built on.
+"""Checks that the one fixed procedure recovers the ideal curves it is built on,
+and that it treats every landform alike.
 
 Run:  py -m pytest tests
 """
@@ -17,7 +18,11 @@ import ideal_shape as I  # noqa: E402
 
 def families(item):
     """The families the halves took, each half choosing its own."""
-    return set(item["comparisons"][I.BEST]["fams"].values())
+    return {f for f, _, _ in item["fit"]["sides"].values()}
+
+
+def bends(item):
+    return [v for _, _, v in item["fit"]["sides"].values()]
 
 
 def two_sided(g_fn, half_width=1000.0, height=200.0, left_share=0.5, n=1201, kind=I.HILL,
@@ -38,8 +43,28 @@ def two_sided(g_fn, half_width=1000.0, height=200.0, left_share=0.5, n=1201, kin
     return x, (height - z if kind == I.VALLEY else z)
 
 
-def params(item, fam=None):
-    return item["comparisons"][fam or item["family"]]["params"]
+def assert_recovers(item, g_true, tol=0.01):
+    """The fitted ideal lies on the true curve: less than tol of the box between them on each half."""
+    for s, g in item["ideal"].items():
+        assert np.trapezoid(np.abs(g - g_true(I.U)), I.U) < tol, s
+
+
+def straight_departure(item):
+    """Departure from a fixed straight cone or V on the same frame, for scale."""
+    straight = {h["side"]: I.parabola_curve(I.U, 0.0) for h in item["halves"]}
+    return I.compare(item["halves"], straight, item["kind"])["departure"]
+
+
+def sample(path):
+    d = pd.read_csv(path)
+    x, z = d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float)
+    if "ridge" in path.name:
+        return I.read_ridge(x, z)["whole"]
+    kind = I.SLOPE if "longprofile" in path.name else I.VALLEY if "transect" in path.name else I.HILL
+    return I.measure(x, z, kind)
+
+
+SAMPLES = [p for p in sorted((ROOT / "samples").glob("sample_*.csv")) if "landform_reference" not in p.name]
 
 
 @pytest.mark.parametrize("k", [-1.0, -0.5, 0.0, 0.5, 1.0])
@@ -48,60 +73,37 @@ def test_a_parabola_is_fitted_with_a_parabola(k, kind):
     x, z = two_sided(lambda u: I.parabola_curve(u, k), kind=kind)
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
-    assert families(item) == {"parabola"}
-    for v in params(item).values():
-        assert v == pytest.approx(k, abs=0.03)
+    if k != 0.0:
+        # A straight side is a parabola, an exponential and a superellipse at
+        # once; any of them is right.
+        assert families(item) == {"parabola"}
+    assert_recovers(item, lambda u: I.parabola_curve(u, k))
     assert item["departure"] < 0.005
 
 
 @pytest.mark.parametrize("k", [-1.0, -0.5, 0.5, 1.0])
 def test_a_curved_profile_is_not_left_with_a_bent_triangle(k):
-    # The complaint this procedure answers: a real parabola must beat the
-    # straight comparison by a wide margin and not be named straight.
+    # A real parabola must beat a straight cone by a wide margin and not be named straight.
     item = I.measure(*two_sided(lambda u: I.parabola_curve(u, k)), I.HILL)
-    assert item["comparisons"][I.STRAIGHT]["departure"] > 10 * item["departure"]
+    assert straight_departure(item) > 10 * item["departure"]
     assert item["landmark"] != "straight"
 
 
-@pytest.mark.parametrize("e", [0.5, 3.0, 5.0])
+@pytest.mark.parametrize("e", [0.5, 2.0, 3.0, 5.0])
 @pytest.mark.parametrize("kind", [I.HILL, I.VALLEY])
 def test_shapes_beyond_any_parabola_go_to_the_superellipse(e, kind):
-    x, z = two_sided(lambda u: I.ideal_curve(u, e), kind=kind)
+    x, z = two_sided(lambda u: I.superellipse_curve(u, e), kind=kind)
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
     assert families(item) == {"superellipse"}
-    for v in params(item).values():
-        assert v == pytest.approx(e, rel=0.05)
+    # e = 0.5 comes to a cusp at the apex that the smoothing rounds off.
+    assert_recovers(item, lambda u: I.superellipse_curve(u, e), tol=0.025 if e < 1 else 0.01)
     assert item["departure"] < 0.01
-
-
-@pytest.mark.parametrize("height,bulge", [(600.0, 0.10), (600.0, -0.10), (1000.0, 0.15)])
-def test_a_true_circular_arc_is_fitted_with_the_circle(height, bulge):
-    a = height / 1000.0
-    x, z = two_sided(lambda u: I.circle_curve(u, bulge, a), height=height)
-    item = I.measure(x, z, I.HILL)
-    assert item["ok"], item["problem"]
-    assert families(item) == {"circle"}
-    for v in params(item).values():
-        assert v == pytest.approx(bulge, abs=0.01)
-    assert item["departure"] < 0.005
-
-
-def test_circle_passes_through_apex_and_foot_and_refuses_overhangs():
-    for a in (0.05, 0.2, 0.6, 1.0):
-        for b in (-0.01, 0.01):
-            g = I.circle_curve(I.U, b, a)
-            assert g[0] == pytest.approx(1.0)
-            assert g[-1] == pytest.approx(0.0, abs=1e-9)
-    # On a low feature a strongly bulging arc would rise above the apex.
-    assert I.circle_curve(I.U, 0.3, 0.1) is None
 
 
 def test_a_straight_cone_stays_straight():
     item = I.measure(*two_sided(lambda u: 1.0 - u), I.HILL)
-    assert families(item) == {"parabola"}           # the tie goes to the parabola
-    for v in params(item).values():
-        assert abs(v) < 0.03
+    assert_recovers(item, lambda u: 1.0 - u)
     assert item["landmark"] == "straight"
     assert item["name"] == "straight-sided cone"
 
@@ -136,9 +138,8 @@ def test_a_valley_with_unequal_rims_is_read_to_the_lower_rim():
     for h in item["halves"]:
         assert h["height"] == pytest.approx(120.0, rel=0.03)
     # Cut at the lower rim, each wall is still a U-shaped parabola.
-    for v in params(item, "parabola").values():
-        assert v == pytest.approx(-1.0, abs=0.05)
-    assert item["comparisons"]["parabola"]["departure"] < 0.01
+    assert families(item) == {"parabola"}
+    assert_recovers(item, lambda u: I.parabola_curve(u, -1.0))
     assert item["departure"] < 0.01
 
 
@@ -153,22 +154,28 @@ def test_a_graded_profile_is_fitted_with_the_exponential(a, kind):
     item = I.measure(x, z, kind)
     assert item["ok"], item["problem"]
     assert families(item) == {"exponential"}
-    for v in params(item).values():
+    for v in bends(item):
         assert v == pytest.approx(a, rel=0.05)
     assert item["departure"] < 0.005
 
 
-def test_flat_floor_is_measured_and_the_walls_fitted_beyond_it():
+def test_a_flat_floor_is_fitted_as_a_level_stretch_with_straight_walls():
     # Straight walls on a flat floor three tenths of the width across.
     x, z = two_sided(lambda u: np.minimum(1.0 - u, 0.7) / 0.7, kind=I.VALLEY)
     item = I.measure(x, z, I.VALLEY)
     assert item["ok"]
     assert item["flat"]
     assert item["name"] == "V-shaped with a flat floor"
-    assert families(item) == {"parabola"}
-    for v in params(item).values():
-        assert abs(v) < 0.1                      # the walls are straight
-    assert item["departure"] < 0.02
+    for fam, level, v in item["fit"]["sides"].values():
+        assert level == pytest.approx(0.3, abs=0.03)
+        assert fam == "parabola" and abs(v) < 0.1      # the walls are straight
+    assert item["departure"] < 0.01
+
+
+def test_a_rounded_floor_is_not_given_a_flat_one():
+    item = I.measure(*two_sided(lambda u: I.parabola_curve(u, -1.0), kind=I.VALLEY), I.VALLEY)
+    assert not item["flat"]
+    assert item["name"] == "parabolic U"
 
 
 def test_rock_sign_is_the_same_for_hills_and_valleys():
@@ -180,10 +187,12 @@ def test_rock_sign_is_the_same_for_hills_and_valleys():
     # For a valley, extra rock near the rim is LESS depth there.
     valley = I.measure(*two_sided(lambda u: np.clip(1.0 - u - bump(u), 0.0, None), kind=I.VALLEY),
                        I.VALLEY)
-    assert hill["comparisons"][I.STRAIGHT]["net"] > 0
-    assert valley["comparisons"][I.STRAIGHT]["net"] > 0
-    assert hill["comparisons"][I.STRAIGHT]["zones"]["foot"] > 0
-    assert valley["comparisons"][I.STRAIGHT]["zones"]["rim"] > 0
+    for item in (hill, valley):
+        straight = {h["side"]: I.parabola_curve(I.U, 0.0) for h in item["halves"]}
+        c = I.compare(item["halves"], straight, item["kind"])
+        assert c["net"] > 0
+        near_foot = I.U > 0.7
+        assert all(c["residual"][s][near_foot].mean() > 0 for s in c["residual"])
 
 
 def test_long_profile_is_one_half_and_direction_does_not_matter():
@@ -204,36 +213,95 @@ def test_summit_at_the_end_is_refused():
     assert item["problem"]
 
 
-@pytest.mark.parametrize("path", sorted((ROOT / "samples").glob("sample_*.csv")))
+# ---------------------------------------------------------------------
+# One procedure, the same for every landform
+# ---------------------------------------------------------------------
+def test_the_departure_does_not_depend_on_size():
+    """The same landform drawn bigger, wider or taller gets the same number."""
+    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_taranaki_stratovolcano.csv")
+    x, z = d.iloc[:, 0].to_numpy(dtype=float), d.iloc[:, 1].to_numpy(dtype=float)
+    base = I.measure(x, z, I.HILL)["departure"]
+    for sx, sz in ((10.0, 1.0), (1.0, 0.1), (0.003, 7.0)):
+        assert I.measure(x * sx, z * sz + 500.0, I.HILL)["departure"] == pytest.approx(base, abs=1e-6)
+
+
+def test_the_departure_is_the_least_rock_out_of_place():
+    """Nudging the fitted top, level stretch or bend never leaves less rock out of place."""
+    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_newberry_broad_with_caldera.csv")
+    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
+    fit, halves = item["fit"], item["halves"]
+    assert I._out_of_place(halves, fit["top"], fit["sides"]) == pytest.approx(item["departure"], abs=1e-9)
+    rng = np.random.default_rng(0)
+    for _ in range(40):
+        top = fit["top"] + rng.normal(0, 0.01)
+        sides = {s: (f, c + rng.normal(0, 0.01), v * (1 + rng.normal(0, 0.01)))
+                 for s, (f, c, v) in fit["sides"].items()}
+        assert I._out_of_place(halves, top, sides) >= item["departure"] - 1e-6
+
+
+def test_a_caldera_gets_one_level_top_not_a_staircase():
+    """Crater Lake: one ideal, level across the caldera at one height on both sides."""
+    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_craterlake_caldera.csv")
+    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
+    left, right = item["halves"]
+    assert left["height"] == right["height"]
+    assert item["ideal"]["L"][0] == pytest.approx(item["ideal"]["R"][0])
+    assert item["flat"]
+
+
+def test_a_spike_on_a_broad_rise_is_extra_rock_not_the_top_of_the_ideal():
+    """A narrow volcano on a broad dome: the ideal follows the dome and the spike is extra rock."""
+    x = np.linspace(-1500.0, 1500.0, 3001)
+    z = 200.0 * np.clip(I.parabola_curve(np.abs(x) / 1000.0, -1.0), 0.0, None) \
+        + 150.0 * np.exp(-(x / 15.0) ** 2)
+    item = I.measure(x, z, I.HILL)
+    assert item["fit"]["top"] < 0.75
+    assert item["excess"] > item["deficit"]
+
+
+@pytest.mark.parametrize("path", SAMPLES, ids=lambda p: p.stem)
 def test_every_sample_profile_measures(path):
-    if "landform_reference" in path.name:
-        pytest.skip("reference table, not a profile")
-    kind = I.SLOPE if "longprofile" in path.name else I.VALLEY if "transect" in path.name else I.HILL
-    d = pd.read_csv(path)
-    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], kind)
+    item = sample(path)
     assert item["ok"], item["problem"]
     assert np.isfinite(item["departure"])
-    # The chosen ideal is never worse than a straight cone or V.
-    assert item["departure"] <= item["comparisons"][I.STRAIGHT]["departure"] + 1e-9
+    # The ideal never stands above the real top, and is never worse than a straight cone or V.
+    assert 0.0 < item["fit"]["top"] <= 1.0
+    assert item["departure"] <= straight_departure(item) + 1e-9
     assert I.summary_row(item, path.stem)
 
 
+def test_transects_are_averaged():
+    x, z = two_sided(lambda u: 1.0 - u)
+    items = [I.measure(x, z + 30.0 * np.exp(-((x - c) / 60.0) ** 2), I.HILL) for c in (-500.0, 0.0, 400.0)]
+    items.append({"ok": False})
+    avg = I.average(items)
+    d = [it["departure"] for it in items[:3]]
+    assert avg["n"] == 3 and avg["failed"] == 1
+    assert avg["mean"] == pytest.approx(np.mean(d))
+    assert avg["sd"] == pytest.approx(np.std(d, ddof=1))
+    assert (avg["lo"], avg["hi"]) == (min(d), max(d))
+    one = I.average(items[:1])
+    assert one["sd"] == 0.0 and one["mean"] == d[0]
+
+
+# ---------------------------------------------------------------------
+# Spreading ridges
+# ---------------------------------------------------------------------
 RIDGE_CLASS = {"ultraslow": "slow", "slow": "slow", "intermediate": "intermediate", "fast": "fast",
                "superfast": "fast"}
 
 
-@pytest.mark.parametrize("path", sorted((ROOT / "samples").glob("sample_real_ridge_*.csv")))
+@pytest.mark.parametrize("path", sorted((ROOT / "samples").glob("sample_real_ridge_*.csv")), ids=lambda p: p.stem)
 def test_each_real_ridge_reads_as_its_spreading_rate(path):
     d = pd.read_csv(path)
     r = I.read_ridge(d.iloc[:, 0], d.iloc[:, 1])
     assert r["rate_class"] == RIDGE_CLASS[path.stem.rsplit("_", 1)[-1]]
     assert r["axis_type"] == ("axial valley" if r["rate_class"] == "slow" else "axial high")
-    assert r["whole"]["ok"] and np.isfinite(r["cooling_departure"])
-    # The whole ridge is read out from the axis, down both flanks.
+    assert r["whole"]["ok"]
+    # The whole ridge is framed from the axis, down both flanks.
     m = r["whole"]["m"]
     assert m["x_apex"] == r["axis"]
     assert min(r["axis"] - m["x_left"], m["x_right"] - r["axis"]) > 50_000.0
-    assert (r["crest_split"] > 20_000.0) == (r["rate_class"] == "slow")
 
 
 def _cooling_ridge(axial):
@@ -242,19 +310,16 @@ def _cooling_ridge(axial):
     return x, -2500.0 - 6.0 * np.sqrt(np.abs(x)) + axial(np.abs(x))
 
 
-def test_an_axial_rift_valley_reads_slow():
+def test_an_axial_rift_valley_reads_slow_and_is_missing_rock():
     x, z = _cooling_ridge(lambda r: -1500.0 * np.clip(1 - r / 15_000, 0, 1) + 800.0 * np.exp(-((r - 20_000) / 6000) ** 2))
     r = I.read_ridge(x, z)
     assert r["axis_type"] == "axial valley" and r["rate_class"] == "slow"
-    assert abs(r["axis_valley"]["m"]["x_apex"]) <= I.RIDGE["on_axis"]
+    w = r["whole"]
+    # The rift is cut below the ideal at the axis on both sides.
+    assert all(w["residual"][s][0] < 0 for s in ("L", "R"))
 
 
-def test_a_peaked_axial_high_reads_fast_and_a_pure_cooling_ridge_fits_the_cooling_curve():
-    x, z = _cooling_ridge(lambda r: 0.0 * r)
-    r = I.read_ridge(x, z)
-    # Only the smoothing of the sharp crest is left, and none of the four families does as well.
-    assert r["cooling_departure"] < 0.02
-    assert r["cooling_departure"] < r["whole"]["departure"]
+def test_a_peaked_axial_high_reads_fast():
     x, z = _cooling_ridge(lambda r: 300.0 * np.exp(-r / 4000))
     r = I.read_ridge(x, z)
     assert r["axis_type"] == "axial high" and r["rate_class"] == "fast"
@@ -264,33 +329,15 @@ def test_each_half_takes_its_own_family():
     """A dome on one side and a graded concave flank on the other are not forced into one shape."""
     x = np.linspace(-1500.0, 1500.0, 1801)
     u = np.clip(np.abs(x) / 1000.0, 0.0, 1.0)
-    a = 5.0
-    g = np.where(x < 0, I.parabola_curve(u, -1.0), (np.exp(-a * u) - np.exp(-a)) / (1 - np.exp(-a)))
+    g = np.where(x < 0, I.parabola_curve(u, -1.0), I.exponential_curve(u, 5.0))
     item = I.measure(x, 200.0 * g, I.HILL)
-    assert item["comparisons"][I.BEST]["fams"] == {"L": "parabola", "R": "exponential"}
-    # Each half on its own does at least as well as any one family on both.
-    assert all(item["departure"] <= item["comparisons"][f]["departure"] + 1e-9 for f in I.FAMILIES)
+    assert {s: f for s, (f, _, _) in item["fit"]["sides"].items()} == {"L": "parabola", "R": "exponential"}
+    assert item["departure"] < 0.005
 
 
-def test_each_half_is_pinned_at_its_own_crest():
-    """A ridge whose rift mountains stand at different heights: each flank from its own crest."""
-    x = np.arange(-200_000.0, 200_001.0, 500.0)
-    r = np.abs(x)
-    crest = np.where(x < 0, 1200.0, 800.0)
-    z = -2500.0 - 6.0 * np.sqrt(r) + crest * np.exp(-((r - 20_000) / 7000) ** 2) - 1800.0 * np.clip(1 - r / 12_000, 0, 1)
-    rd = I.read_ridge(x, z)
-    assert rd["axis_type"] == "axial valley"
-    left, right = rd["whole"]["halves"]
-    assert left["height"] - right["height"] > 300.0
-
-
-def test_a_caldera_is_read_from_its_middle_and_each_rim():
-    """Crater Lake: rims at different heights round the lake, each flank from its own rim."""
-    d = pd.read_csv(ROOT / "samples" / "sample_real_volcano_craterlake_caldera.csv")
-    item = I.measure(d.iloc[:, 0], d.iloc[:, 1], I.HILL)
-    m = item["m"]
-    assert m["split"] and m["x_flat_left"] < m["x_apex"] < m["x_flat_right"]
-    assert m["x_flat_right"] - m["x_flat_left"] > 8000.0
-    left, right = item["halves"]
-    assert left["height"] != right["height"]
-    assert all(h["flat_u"] > 0 for h in item["halves"])
+def test_real_transects_of_one_volcano_are_averaged():
+    """Four transects through the summit of Mount Fuji, each fitted the same way."""
+    df = pd.read_csv(ROOT / "samples" / "transects_real_fuji_four_azimuths.csv")
+    avg = I.average([I.measure(df.iloc[:, 0], df[c], I.HILL) for c in df.columns[1:]])
+    assert avg["n"] == 4 and avg["failed"] == 0
+    assert avg["lo"] < avg["mean"] < avg["hi"] < 0.025

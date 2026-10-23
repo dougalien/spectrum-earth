@@ -13,7 +13,6 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 import dougalien_brand as brand
-import ideal_shape
 import ideal_shape_view as ideal_view
 
 import ai_client
@@ -3227,25 +3226,25 @@ with control_ideal:
     ideal_feature = st.radio(
         "What is the feature?", _feature_names,
         horizontal=True, key=_feature_key,
-        help="A valley is fitted from its floor up to each rim, a hill from its summit down to each "
+        help="A valley is read from its floor up to each rim, a hill from its summit down to each "
              "foot, and a long profile as one slope from its head to its mouth. A spreading ridge is "
-             "fitted whole as a hill and read again at its axis (distance 0, or the middle of the "
-             "profile) to tell an axial valley from an axial high.",
+             "read as a hill from its axis (distance 0, or the middle of the profile), and the axis "
+             "is read as an axial valley or an axial high. The fit is the same for all of them.",
     )
     _u1, _u2, _u3 = st.columns([1.0, 1.0, 1.0], gap="small")
     with _u1:
         st.selectbox("Distance units", list(ideal_view.DISTANCE_UNITS), key="ideal_distance_unit",
-                     help="Only the circle in true proportions and the width/height ratio need "
-                          "these: they compare distance with elevation directly.")
+                     help="The departure does not depend on units. They label the plot in the "
+                          "file's own units and let a spreading ridge be read in kilometres.")
     with _u2:
         st.selectbox("Elevation units", list(ideal_view.ELEVATION_UNITS), key="ideal_elevation_unit")
     with _u3:
         st.checkbox("Crop X Range", key="crop_enabled",
                     help="Trim the profile to one feature before fitting.")
     st.caption(
-        "Each half of the profile is pinned at the apex and the foot and fitted with the best "
-        "parabola, exponential, true circle and superellipse. The curve that fits best is the "
-        "ideal, and the extra and missing rock against it is the departure."
+        "One procedure for every landform: the ideal curve that leaves the least rock out of "
+        "place is fitted, and that rock, as a share of the landform's box, is its departure. "
+        "0 means the landform is its ideal."
     )
 
 with st.expander("Settings for the other analyses (axes, smoothing, peaks, FFT, landform screening, AI)"):
@@ -3490,15 +3489,10 @@ raw_y = y.copy()
 # The ideal-shape fit runs on the raw (cleaned, cropped) profile in common
 # units. It resamples and smooths at the scale of the feature itself, so the
 # display settings for the other analyses cannot change it.
-_kind = ideal_view.FEATURE_CHOICES[ideal_feature]
 _sx = ideal_view.DISTANCE_UNITS[st.session_state.ideal_distance_unit]
 _sz = ideal_view.ELEVATION_UNITS[st.session_state.ideal_elevation_unit]
-ridge_reading = None
-if ideal_feature == ideal_view.RIDGE_FEATURE:
-    ridge_reading = ideal_shape.read_ridge(raw_x * _sx, raw_y * _sz)
-    ideal_item = ridge_reading["whole"]
-else:
-    ideal_item = ideal_shape.measure(raw_x * _sx, raw_y * _sz, _kind)
+ideal_item, ridge_reading = ideal_view.fit_profile(np.asarray(raw_x, float) * _sx,
+                                                   np.asarray(raw_y, float) * _sz, ideal_feature)
 if ideal_item.get("ok"):
     # Draw in the file's own units.
     ideal_item = ideal_view.to_display_units(ideal_item, _sx, _sz)
@@ -3702,13 +3696,13 @@ with main_tabs[0]:
     ideal_view.render_ideal_tab(
         ideal_item, st.session_state.x_label, st.session_state.y_label,
         st.session_state.get("source_name", ""), ridge=ridge_reading,
+        feature=ideal_feature, units=(_sx, _sz), read_file=read_uploaded_file,
     )
 
 with main_tabs[1]:
     ideal_view.render_shape_chart(
         ideal_item, st.session_state.get("source_name", ""), SAMPLE_FILES,
-        lambda label: ideal_view.FEATURE_CHOICES[sample_feature(label)],
-        Path(__file__).resolve().parent / "samples",
+        sample_feature, Path(__file__).resolve().parent / "samples",
     )
 
 with main_tabs[2]:

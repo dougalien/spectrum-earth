@@ -210,12 +210,16 @@ _PLACES = (("middle right", lambda w: (8, -6)), ("middle left", lambda w: (-8 - 
            ("top left", lambda w: (-4 - w, 4)), ("bottom left", lambda w: (-4 - w, -16)))
 
 
-def label_places(x, y, labels, x_range, y_range, size=(1150.0, 520.0)) -> list:
+def label_places(x, y, labels, x_range, y_range, size=(1150.0, 520.0), avoid=()) -> list:
     """A place beside each dot for its label, chosen so labels cover as little as they can of the
-    dots and of each other: each label takes the first place that is clear, or the least covered."""
+    dots, of each other, and of any `avoid` boxes ((x, y) centre in data units, width and height in
+    pixels): each label takes the first place that is clear, or the least covered."""
     sx, sy = size[0] / (x_range[1] - x_range[0]), size[1] / (y_range[1] - y_range[0])
     px, py = (np.asarray(x) - x_range[0]) * sx, (np.asarray(y) - y_range[0]) * sy
     taken = [(a - 6, b - 6, a + 6, b + 6) for a, b in zip(px, py)]
+    for (ax, ay), w, h in avoid:
+        cx, cy = (ax - x_range[0]) * sx, (ay - y_range[0]) * sy
+        taken.append((cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2))
 
     def covered(box):
         return sum(max(0.0, min(box[2], t[2]) - max(box[0], t[0])) * max(0.0, min(box[3], t[3]) - max(box[1], t[1]))
@@ -247,22 +251,70 @@ def rank_agreement(lf: pd.DataFrame) -> float:
     return float(lf["best"].rank().corr(lf["triangle"].rank()))
 
 
+FIELD_SHARES = ((0.9, 0.10), (0.5, 0.24))  # share of a group's transects enclosed, and its shade
+
+
+def _rgba(hex_colour: str, alpha: float) -> str:
+    h = hex_colour.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})"
+
+
+def group_field(x, y, x_range, y_range, n: int = 140):
+    """Where a group's points cluster: a smooth density of them over the plot, and the densities
+    whose contours enclose each share of FIELD_SHARES (densest first). None for too few points."""
+    from scipy.stats import gaussian_kde
+
+    pts = np.vstack([np.asarray(x, float), np.asarray(y, float)])
+    if pts.shape[1] < 5:
+        return None
+    try:
+        kde = gaussian_kde(pts)
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+    gx, gy = np.linspace(*x_range, n), np.linspace(*y_range, n)
+    gxx, gyy = np.meshgrid(gx, gy)
+    z = kde(np.vstack([gxx.ravel(), gyy.ravel()])).reshape(gxx.shape)
+    z[gy < 0, :] = 0.0  # no departure is below 0, so the field stops at the bottom edge
+    at = kde(pts)
+    return gx, gy, z, {share: float(np.quantile(at, 1.0 - share)) for share, _ in FIELD_SHARES}
+
+
 def two_ideals_figure(t: pd.DataFrame, lf: pd.DataFrame):
     """Each landform's departure from the best-fit curve against its departure from the fixed triangle.
 
-    How far below the line where the two are equal a landform sits is the rock
-    that bending the sides, levelling the top and moving the summit account for.
+    Each group's field is shaded where its transects cluster. The perfect shapes
+    sit on the bottom edge: the best fit matches them exactly, and the triangle
+    axis says how far each is from the fixed triangle. How far above that edge a
+    landform sits is the rock no smooth curve accounts for.
     """
-    hi = max([ideal.TRIANGLE_PARABOLA * 1.15] + list(t["triangle"] * 1.05)) * 100.0
+    hi = max([max(ideal.TRIANGLE_LANDMARKS.values()) * 1.12] + list(t["triangle"] * 1.05)) * 100.0
     top = max([0.06] + list(t["best"] * 1.1)) * 100.0
+    floor = -0.09 * top
+    marks = {k: v * 100.0 for k, v in ideal.TRIANGLE_LANDMARKS.items()}
+    mark_y = 0.55 * floor
     names = [short_name(n) for n in lf["Landform"]]
-    places = dict(zip(lf["id"], label_places(lf["triangle"] * 100, lf["best"] * 100, names, (0, hi), (0, top))))
+    avoid = [((mx, mark_y), 2 * 5.6 * len(k), 12) for k, mx in marks.items()]
+    places = dict(zip(lf["id"], label_places(lf["triangle"] * 100, lf["best"] * 100, names, (0, hi), (floor, top),
+                                             avoid=avoid)))
     fig = go.Figure()
+    for g, words in GROUPS.items():
+        tg = t[t["group"] == g]
+        field = group_field(tg["triangle"] * 100, tg["best"] * 100, (0, hi), (floor, top))
+        if field is None:
+            continue
+        gx, gy, z, levels = field
+        c = GROUP_COLOURS[g]
+        for share, alpha in FIELD_SHARES:
+            fig.add_trace(go.Contour(
+                # A constraint contour shades the ground it leaves out, so keeping "<" shades the field.
+                x=gx, y=gy, z=z, contours=dict(type="constraint", operation="<", value=levels[share]),
+                fillcolor=_rgba(c, alpha), line=dict(color=_rgba(c, 0.55), width=1),
+                showscale=False, hoverinfo="skip", legendgroup=g, showlegend=False,
+                name=f"{words}: where {share:.0%} of the transects fall",
+            ))
     fig.add_trace(go.Scatter(x=[0, hi], y=[0, hi], mode="lines", line=dict(color=ideal_view.MUTED, width=1, dash="dash"),
                              name="the two equal", hoverinfo="skip"))
-    fig.add_vline(x=ideal.TRIANGLE_PARABOLA * 100.0, line=dict(color=ideal_view.INK_2, width=1, dash="dot"),
-                  annotation_text=ideal_view.TRIANGLE_LINE, annotation_position="top",
-                  annotation_font=dict(size=11, color=ideal_view.INK_2))
+    fig.add_hline(y=0, line=dict(color=ideal_view.INK_2, width=1))
     for g, words in GROUPS.items():
         c = GROUP_COLOURS[g]
         tg, lg = t[t["group"] == g], lf[lf["group"] == g]
@@ -282,12 +334,33 @@ def two_ideals_figure(t: pd.DataFrame, lf: pd.DataFrame):
             hovertemplate=("<b>%{customdata[0]}</b><br>fixed triangle %{x:.1f}% (rank %{customdata[1]})"
                            "<br>best-fit curve %{y:.1f}% (rank %{customdata[2]})<extra></extra>"),
         ))
-    ideal_view._layout(fig, "Departure from the best-fit curve against departure from the fixed triangle", 660)
+    fig.add_trace(go.Scatter(
+        x=list(marks.values()), y=[0.0] * len(marks), mode="markers", name="perfect shapes",
+        marker=dict(symbol="diamond", size=12, color=ideal_view.INK, line=dict(width=1.5, color="#fcfcfb")),
+        customdata=list(marks), cliponaxis=False,
+        hovertemplate="<b>%{customdata}</b><br>fixed triangle %{x:.1f}%, best-fit curve 0%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=list(marks.values()), y=[mark_y] * len(marks), mode="text", text=list(marks), showlegend=False,
+        textposition=["middle right"] + ["middle center"] * (len(marks) - 1), textfont=dict(size=11, color=ideal_view.INK), hoverinfo="skip",
+    ))
+    ideal_view._layout(fig, "Departure from the best-fit curve against departure from the fixed triangle", 680)
     fig.update_layout(margin=dict(l=20, r=20, t=70, b=40),
                       legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0))
     fig.update_xaxes(title="departure from the fixed triangle, % of the box", range=[0, hi])
-    fig.update_yaxes(title="departure from the best-fit curve, % of the box", range=[0, top])
+    fig.update_yaxes(title="departure from the best-fit curve, % of the box", range=[floor, top])
     return fig
+
+
+def group_middles(t: pd.DataFrame) -> str:
+    """The middle (median) transect of each group on both axes, in words, lowest best fit first."""
+    m = t.groupby("group")[["best", "triangle"]].median().sort_values("best")
+    if len(m) < 2:
+        return ""
+    names = [GROUPS[g].lower() for g in m.index]
+    return (" The middle transect of each group sits at " + ", ".join(
+        f"{b:.1%} for {n}" for n, b in zip(names, m["best"])) + " on the best-fit axis, and at "
+        + ", ".join(f"{v:.1%}" for v in m["triangle"]) + " on the triangle axis.")
 
 
 def render_two_ideals(library: dict, fits: list):
@@ -299,12 +372,17 @@ def render_two_ideals(library: dict, fits: list):
     st.plotly_chart(two_ideals_figure(t, lf), width="stretch")
     rho = rank_agreement(lf)
     st.caption(
-        "Each large dot is a landform's average, each faint dot one transect. Every transect in the "
-        "library is closer to its best fit than to the triangle, so all sit below the dashed line where "
-        "the two are equal, and how far below it a landform sits is the rock that bending the sides, "
-        "levelling the top and moving the summit account for. Low and to the right: smooth but bowed or lopsided "
-        "shapes that a curve fits closely and the triangle does not. Higher up: rough or irregular "
-        "profiles that no smooth curve fits."
+        "Each shaded field shows where a group's transects cluster: the darker part holds half of them, "
+        "the lighter part nine in ten. Each large dot is a landform's average, each faint dot one "
+        "transect. The black diamonds on the bottom edge are perfect shapes. The best fit matches any of "
+        "them exactly, so they sit at 0 on the best-fit axis, and the triangle axis says how far each is "
+        "from the fixed triangle: a perfect parabola, bowed in or domed, "
+        f"{ideal.TRIANGLE_LANDMARKS['perfect parabola']:.1%}, and a quarter circle "
+        f"{ideal.TRIANGLE_LANDMARKS['quarter circle']:.1%}. So how far a landform sits above the bottom "
+        "edge is the rock no smooth curve accounts for (roughness and irregularity), and how far along "
+        "it sits is how bowed or lopsided it is as well. Every transect in the library is closer to its "
+        "best fit than to the triangle, so all sit below the dashed line where the two are equal."
+        + group_middles(t)
         + (f" The two orders agree only loosely (rank agreement {rho:.2f}, where 1 is the same order and "
            "0 unrelated), so the two numbers measure different things." if np.isfinite(rho) and rho < 0.7 else
            f" Rank agreement between the two orders: {rho:.2f} (1 is the same order, 0 unrelated)."

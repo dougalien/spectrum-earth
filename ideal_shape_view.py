@@ -457,7 +457,7 @@ def departure_bands(fig, top: float, against: str):
     """The provisional grades behind a best-fit chart, or the parabola's mark on a triangle chart."""
     if against == ideal.TRIANGLE:
         fig.add_vline(x=ideal.TRIANGLE_PARABOLA * 100.0, line=dict(color=INK_2, width=1, dash="dot"),
-                      annotation_text=TRIANGLE_LINE, annotation_position="top",
+                      annotation_text=TRIANGLE_LINE + " would sit here", annotation_position="top",
                       annotation_font=dict(size=11, color=INK_2))
         return
     lo = 0.0

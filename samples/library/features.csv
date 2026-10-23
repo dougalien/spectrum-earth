@@ -1,31 +1,31 @@
-id,name,feature,place,lon,lat,half_km,spacing_km,azimuths,full_rate_mm_yr,notes
-fuji,Mount Fuji,volcano,"Honshu, Japan",138.7274,35.3606,22,,0;45;90;135,,Stratovolcano.
-mayon,Mayon,volcano,"Luzon, Philippines",123.6853,13.2548,11,,0;45;90;135,,Stratovolcano; its south-east side meets the sea.
-taranaki,Mount Taranaki,volcano,"North Island, New Zealand",174.0634,-39.2963,14,,0;45;90;135,,Stratovolcano; the Pouakai and Kaitake ranges stand on its north-west side.
-shishaldin,Shishaldin,volcano,"Unimak Island, Alaska, USA",-163.9711,54.7554,15,,0;45;90;135,,Stratovolcano; the coast is within 15 km on two sides.
-rainier,Mount Rainier,volcano,"Washington, USA",-121.7603,46.8528,20,,0;45;90;135,,Glaciated stratovolcano.
-kilimanjaro,Kilimanjaro (Kibo),volcano,Tanzania,37.3556,-3.0674,40,,0;45;90;135,,Stratovolcano with a summit caldera; Mawenzi stands 11 km east of Kibo.
-etna,Mount Etna,volcano,"Sicily, Italy",14.9934,37.7510,25,,0;45;90;135,,Stratovolcano; the Valle del Bove cuts its east flank and the sea is 20 km east.
-maunakea,Mauna Kea,volcano,"Hawaii, USA",-155.4681,19.8207,40,,0;45;90;135,,Shield volcano (above sea level only); Mauna Loa rises to its south.
-fournaise,Piton de la Fournaise,volcano,"Reunion, France",55.7083,-21.2444,14,,0;45;90;135,,Shield volcano inside the Enclos Fouque caldera; the sea is 10 km east.
-craterlake,Crater Lake (Mount Mazama),volcano,"Oregon, USA",-122.1090,42.9446,16,,0;45;90;135,,Caldera; the lake surface (about 1883 m) is read as ground.
-yosemite,Yosemite Valley,valley,"California, USA",-119.6000,37.7400,3.5,1.5,,,Glacial trough cut in granite.
-lauterbrunnen,Lauterbrunnen Valley,valley,"Bernese Oberland, Switzerland",7.9100,46.5800,3,1.5,,,Glacial trough.
-kingscanyon,Kings Canyon (Cedar Grove),valley,"California, USA",-118.6200,36.7950,4,1.5,,,Glaciated canyon.
-nantffrancon,Nant Ffrancon,valley,"Snowdonia, Wales, UK",-4.0450,53.1500,2.5,1,,,Glacial trough.
-langdale,Great Langdale,valley,"Lake District, England, UK",-3.0900,54.4450,2.5,1,,,Glacial trough.
-grandcanyon,Grand Canyon (Phantom Ranch),valley,"Arizona, USA",-112.0950,36.1000,12,3,,,River canyon cut by the Colorado River; its rims stand at different heights.
-blackcanyon,Black Canyon of the Gunnison,valley,"Colorado, USA",-107.7200,38.5700,2.5,1,,,River gorge cut in hard crystalline rock.
-hellscanyon,Hells Canyon,valley,"Idaho and Oregon, USA",-116.6000,45.4000,12,3,,,River canyon cut by the Snake River.
-colca,Colca Canyon,valley,"Arequipa, Peru",-71.9000,-15.6000,8,2,,,River canyon.
-rhinegorge,Rhine Gorge (Loreley),valley,"Rhineland-Palatinate, Germany",7.7300,50.1400,2.5,1,,,River gorge; the river surface is read as ground.
-swir10e,SW Indian Ridge 10°E,ridge,Southern Ocean,9.743,-52.979,200,20,145,14,Ultraslow.
-mohns72n,Mohns Ridge 72°N,ridge,Norwegian-Greenland Sea,1.744,72.410,200,20,145,16,Ultraslow.
-mar23n,Mid-Atlantic Ridge 23°N,ridge,North Atlantic,-44.902,23.342,200,20,100,25,Slow.
-mar26n,Mid-Atlantic Ridge 26°N,ridge,North Atlantic,-44.850,26.130,200,20,105,25,Slow.
-mar29n,Mid-Atlantic Ridge 29°N,ridge,North Atlantic,-43.160,29.168,200,20,100,24,Slow.
-jdf45n,Juan de Fuca Ridge 45°N,ridge,NE Pacific,-130.200,45.300,200,20,110,56,Intermediate.
-seir98e,SE Indian Ridge 98°E,ridge,Southern Ocean,97.633,-47.490,200,20,39,70,Intermediate.
-epr12n,East Pacific Rise 12.5°N,ridge,Eastern Pacific,-103.904,12.504,200,20,85,90,Fast.
-epr9n,East Pacific Rise 9.5°N,ridge,Eastern Pacific,-104.244,9.500,200,20,90,110,Fast.
-epr17s,East Pacific Rise 17.5°S,ridge,South Pacific,-113.189,-17.519,200,20,100,145,Superfast.
+id,name,feature,place,lon,lat,half_km,spacing_km,azimuths,full_rate_mm_yr,notes,valley_kind
+fuji,Mount Fuji,volcano,"Honshu, Japan",138.7274,35.3606,22,,0;45;90;135,,Stratovolcano.,
+mayon,Mayon,volcano,"Luzon, Philippines",123.6853,13.2548,11,,0;45;90;135,,Stratovolcano; its south-east side meets the sea.,
+taranaki,Mount Taranaki,volcano,"North Island, New Zealand",174.0634,-39.2963,14,,0;45;90;135,,Stratovolcano; the Pouakai and Kaitake ranges stand on its north-west side.,
+shishaldin,Shishaldin,volcano,"Unimak Island, Alaska, USA",-163.9711,54.7554,15,,0;45;90;135,,Stratovolcano; the coast is within 15 km on two sides.,
+rainier,Mount Rainier,volcano,"Washington, USA",-121.7603,46.8528,20,,0;45;90;135,,Glaciated stratovolcano.,
+kilimanjaro,Kilimanjaro (Kibo),volcano,Tanzania,37.3556,-3.0674,40,,0;45;90;135,,Stratovolcano with a summit caldera; Mawenzi stands 11 km east of Kibo.,
+etna,Mount Etna,volcano,"Sicily, Italy",14.9934,37.7510,25,,0;45;90;135,,Stratovolcano; the Valle del Bove cuts its east flank and the sea is 20 km east.,
+maunakea,Mauna Kea,volcano,"Hawaii, USA",-155.4681,19.8207,40,,0;45;90;135,,Shield volcano (above sea level only); Mauna Loa rises to its south.,
+fournaise,Piton de la Fournaise,volcano,"Reunion, France",55.7083,-21.2444,14,,0;45;90;135,,Shield volcano inside the Enclos Fouque caldera; the sea is 10 km east.,
+craterlake,Crater Lake (Mount Mazama),volcano,"Oregon, USA",-122.1090,42.9446,16,,0;45;90;135,,Caldera; the lake surface (about 1883 m) is read as ground.,
+yosemite,Yosemite Valley,valley,"California, USA",-119.6000,37.7400,3.5,1.5,,,Glacial trough cut in granite.,glacial
+lauterbrunnen,Lauterbrunnen Valley,valley,"Bernese Oberland, Switzerland",7.9100,46.5800,3,1.5,,,Glacial trough.,glacial
+kingscanyon,Kings Canyon (Cedar Grove),valley,"California, USA",-118.6200,36.7950,4,1.5,,,Glaciated canyon.,glacial
+nantffrancon,Nant Ffrancon,valley,"Snowdonia, Wales, UK",-4.0450,53.1500,2.5,1,,,Glacial trough.,glacial
+langdale,Great Langdale,valley,"Lake District, England, UK",-3.0900,54.4450,2.5,1,,,Glacial trough.,glacial
+grandcanyon,Grand Canyon (Phantom Ranch),valley,"Arizona, USA",-112.0950,36.1000,12,3,,,River canyon cut by the Colorado River; its rims stand at different heights.,river
+blackcanyon,Black Canyon of the Gunnison,valley,"Colorado, USA",-107.7200,38.5700,2.5,1,,,River gorge cut in hard crystalline rock.,river
+hellscanyon,Hells Canyon,valley,"Idaho and Oregon, USA",-116.6000,45.4000,12,3,,,River canyon cut by the Snake River.,river
+colca,Colca Canyon,valley,"Arequipa, Peru",-71.9000,-15.6000,8,2,,,River canyon.,river
+rhinegorge,Rhine Gorge (Loreley),valley,"Rhineland-Palatinate, Germany",7.7300,50.1400,2.5,1,,,River gorge; the river surface is read as ground.,river
+swir10e,SW Indian Ridge 10°E,ridge,Southern Ocean,9.743,-52.979,200,20,145,14,Ultraslow.,
+mohns72n,Mohns Ridge 72°N,ridge,Norwegian-Greenland Sea,1.744,72.410,200,20,145,16,Ultraslow.,
+mar23n,Mid-Atlantic Ridge 23°N,ridge,North Atlantic,-44.902,23.342,200,20,100,25,Slow.,
+mar26n,Mid-Atlantic Ridge 26°N,ridge,North Atlantic,-44.850,26.130,200,20,105,25,Slow.,
+mar29n,Mid-Atlantic Ridge 29°N,ridge,North Atlantic,-43.160,29.168,200,20,100,24,Slow.,
+jdf45n,Juan de Fuca Ridge 45°N,ridge,NE Pacific,-130.200,45.300,200,20,110,56,Intermediate.,
+seir98e,SE Indian Ridge 98°E,ridge,Southern Ocean,97.633,-47.490,200,20,39,70,Intermediate.,
+epr12n,East Pacific Rise 12.5°N,ridge,Eastern Pacific,-103.904,12.504,200,20,85,90,Fast.,
+epr9n,East Pacific Rise 9.5°N,ridge,Eastern Pacific,-104.244,9.500,200,20,90,110,Fast.,
+epr17s,East Pacific Rise 17.5°S,ridge,South Pacific,-113.189,-17.519,200,20,100,145,Superfast.,

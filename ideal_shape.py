@@ -748,6 +748,100 @@ def as_triangle(item: dict) -> dict:
             "against": TRIANGLE, "name": TRIANGLE_NAMES[item["kind"]], "grade": ""}
 
 
+# =====================================================================
+# The two circles
+#
+# Wadell measured grains with circles: how near a grain comes to a sphere, and
+# how round its corners are against the largest circle inside it. A landform
+# gets the same two numbers, both in its box (each half stretched to width 1
+# and height 1), so neither depends on size. Across the box, the two halves'
+# quarter circles make a semicircle through both feet and the top: the roundest
+# shape the box holds, and the ideal here.
+#
+#   departure from the semicircle: the rock out of place against it, as a share
+#     of the semicircle (0 is a perfect semicircle).
+#   roundness: the radius of the circle through the top (a valley's floor) and
+#     the two points, one on each side, where the profile has moved a tenth of
+#     its height away from it, as a share of the semicircle's radius. The
+#     semicircle scores 1; a sharp point scores the least any circle can reach
+#     a tenth of the way down, 0.05.
+#
+# Landforms rounded by weathering or by ice should move toward the semicircle.
+# A long profile has one side, so it has no top circle; it gets neither number.
+# =====================================================================
+SEMICIRCLE = superellipse_curve(U, 2.0)
+CIRCLE_AREA = np.pi / 4.0      # the semicircle's share of the box
+ROUND_DROP = 0.10              # the top circle reaches this share of the height down
+ROUND_SMOOTH = 0.02            # running mean over this share of the half-width before reading it
+
+
+def _running_mean(g, frac: float) -> np.ndarray:
+    k = max(3, int(round(frac * len(g))) | 1)
+    return np.convolve(np.pad(np.asarray(g, dtype=float), k // 2, mode="edge"), np.ones(k) / k, mode="valid")
+
+
+def drop_point(g) -> float:
+    """How far out (u) a half first sits a tenth of its height below its top. 0 when the top is
+    narrower than the light smoothing: a point."""
+    gs = _running_mean(g, ROUND_SMOOTH)
+    level = 1.0 - ROUND_DROP
+    below = np.nonzero(gs <= level)[0]
+    if not len(below):
+        return 1.0
+    i = int(below[0])
+    if i == 0:
+        return 0.0
+    a, b = gs[i - 1], gs[i]
+    return float(U[i - 1] + (a - level) / (a - b) * (U[i] - U[i - 1]))
+
+
+def top_circle(halves: list) -> dict:
+    """The circle through the top and the two drop points, in the box with the left half at
+    negative x and the top at (0, 1): its centre, radius and the three points."""
+    pts = [(h["sign"] * drop_point(h["g"]), 1.0 - ROUND_DROP) for h in halves]
+    (ax, ay), (bx, by), (cx, cy) = pts[0], (0.0, 1.0), pts[1]
+    d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-12:  # both drop points at the top: a point, met by the smallest circle
+        return {"x": 0.0, "y": 1.0 - ROUND_DROP / 2.0, "radius": ROUND_DROP / 2.0, "points": [pts[0], (0.0, 1.0), pts[1]]}
+    ux = ((ax ** 2 + ay ** 2) * (by - cy) + (bx ** 2 + by ** 2) * (cy - ay) + (cx ** 2 + cy ** 2) * (ay - by)) / d
+    uy = ((ax ** 2 + ay ** 2) * (cx - bx) + (bx ** 2 + by ** 2) * (ax - cx) + (cx ** 2 + cy ** 2) * (bx - ax)) / d
+    return {"x": float(ux), "y": float(uy), "radius": float(np.hypot(bx - ux, by - uy)),
+            "points": [pts[0], (0.0, 1.0), pts[1]]}
+
+
+def two_circles(halves: list, kind: str) -> dict | None:
+    """Roundness of the top or floor, and departure from the semicircle (with its extra and
+    missing rock), each as a share of the semicircle. None for a long profile."""
+    if len(halves) != 2:
+        return None
+    halves = sorted(halves, key=lambda h: h["sign"])
+    c = compare(halves, {h["side"]: SEMICIRCLE for h in halves}, kind)
+    if not c:
+        return None
+    circle = top_circle(halves)
+    return {"roundness": circle["radius"], "departure": c["departure"] / CIRCLE_AREA,
+            "extra": c["excess"] / CIRCLE_AREA, "missing": c["deficit"] / CIRCLE_AREA, "circle": circle}
+
+
+def circle_numbers_of(g) -> tuple[float, float]:
+    """(roundness, departure from the semicircle) of a perfect shape: both halves g(u)."""
+    h = [{"side": s, "sign": sign, "radius": 1.0, "height": 1.0, "g": np.asarray(g, dtype=float)}
+         for s, sign in (("L", -1.0), ("R", 1.0))]
+    c = two_circles(h, HILL)
+    return c["roundness"], c["departure"]
+
+
+# Perfect shapes on the two circles, sharpest first. The half cosine is the shape slow soil creep
+# alone wears a hill toward: its other shapes die away faster.
+CIRCLE_LANDMARKS = {name: circle_numbers_of(g) for name, g in (
+    ("bowed-in parabola", parabola_curve(U, 1.0)),
+    ("triangle", 1.0 - U),
+    ("worn-down dome (half cosine)", np.cos(np.pi * U / 2.0)),
+    ("dome or U parabola", parabola_curve(U, -1.0)),
+    ("semicircle", SEMICIRCLE),
+)}
+
+
 def departure_class(d: float) -> str:
     if not np.isfinite(d):
         return "-"
@@ -846,6 +940,9 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None) -> dict:
         if kind != SLOPE else 0.0
     triangle = {"ideal": tri, "offset": float(offset), **compare(halves, tri, kind)}
 
+    # The two circles on the same frame.
+    circles = two_circles(halves, kind) if kind != SLOPE else None
+
     # Words for the ideal: the landmark nearest its curves (below any level
     # stretch), and the level stretch when it is a real part of the shape.
     r = {h["side"]: h["radius"] for h in halves}
@@ -856,7 +953,7 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None) -> dict:
     flat = kind != SLOPE and level >= LEVEL_NAMED
     name = PERFECT_SHAPES[landmark]["names"][kind] + (f" with a {VOCAB[kind]['flat']}" if flat else "")
     item.update(
-        ok=True, x=x, z=z, m=m, halves=halves, fit=fit, ideal=ideal, **comp, triangle=triangle,
+        ok=True, x=x, z=z, m=m, halves=halves, fit=fit, ideal=ideal, **comp, triangle=triangle, circles=circles,
         landmark=landmark, flat=flat, level=level, name=name,
         grade=departure_class(comp["departure"]),
     )

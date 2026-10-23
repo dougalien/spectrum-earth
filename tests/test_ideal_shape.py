@@ -448,3 +448,68 @@ def test_perfect_shapes_sit_where_the_landmarks_say():
         item = I.measure(*two_sided(g), I.HILL)
         assert item["departure"] < 0.005, name
         assert item["triangle"]["departure"] == pytest.approx(I.TRIANGLE_LANDMARKS[name], abs=0.01), name
+
+
+# ---------------------------------------------------------------------
+# The two circles: roundness of the top or floor, departure from the semicircle
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("kind", [I.HILL, I.VALLEY])
+def test_a_semicircle_is_the_ideal_of_the_two_circles(kind):
+    """A landform that is the semicircle of its box is as round as it and departs from it by nothing."""
+    c = I.measure(*two_sided(lambda u: I.superellipse_curve(u, 2.0), kind=kind), kind)["circles"]
+    assert c["roundness"] == pytest.approx(1.0, abs=0.03)
+    assert c["departure"] < 0.01
+
+
+@pytest.mark.parametrize("kind", [I.HILL, I.VALLEY])
+@pytest.mark.parametrize("name, g, roundness, departure", [
+    ("triangle", lambda u: 1.0 - u, 0.10, 1.0 - 2.0 / np.pi),
+    ("bowed-in parabola", lambda u: I.parabola_curve(u, 1.0), 0.063, 1.0 - 4.0 / (3.0 * np.pi)),
+    ("dome or U parabola", lambda u: I.parabola_curve(u, -1.0), 0.55, 1.0 - 8.0 / (3.0 * np.pi)),
+    ("worn-down dome (half cosine)", lambda u: np.cos(np.pi * u / 2.0), 0.462, 1.0 - 8.0 / np.pi ** 2),
+])
+def test_perfect_shapes_have_their_circles(name, g, roundness, departure, kind):
+    """The circle through the top and the points a tenth down has radius (a^2 + 0.01) / 0.2, a the
+    distance out to those points; the departure is 1 minus the shape's area over the semicircle's."""
+    assert I.CIRCLE_LANDMARKS[name] == pytest.approx((roundness, departure), abs=0.002)
+    c = I.measure(*two_sided(g, kind=kind), kind)["circles"]
+    assert c["roundness"] == pytest.approx(roundness, abs=0.02)
+    assert c["departure"] == pytest.approx(departure, abs=0.01)
+    # All of it inside the semicircle: missing rock on a hill, rock the bowl of a valley does not have.
+    assert c["missing" if kind == I.HILL else "extra"] == pytest.approx(departure, abs=0.01)
+
+
+def test_a_sharp_point_has_the_least_roundness():
+    c = I.measure(*two_sided(lambda u: (1.0 - u) ** 6), I.HILL)["circles"]
+    assert c["roundness"] == pytest.approx(I.ROUND_DROP / 2.0, abs=0.003)
+
+
+def test_the_two_circles_do_not_depend_on_size():
+    g = lambda u: I.parabola_curve(u, 0.4)
+    small = I.measure(*two_sided(g, half_width=500.0, height=80.0), I.HILL)["circles"]
+    big = I.measure(*two_sided(g, half_width=20000.0, height=3000.0), I.HILL)["circles"]
+    assert big["roundness"] == pytest.approx(small["roundness"], abs=1e-3)
+    assert big["departure"] == pytest.approx(small["departure"], abs=1e-3)
+
+
+def test_a_long_profile_has_no_circles():
+    x = np.linspace(0.0, 20000.0, 801)
+    assert I.measure(x, 1500.0 * (1.0 - x / 20000.0), I.SLOPE)["circles"] is None
+
+
+def test_every_library_transect_has_its_two_circles_stored():
+    for f in FEATURES.itertuples():
+        for col in pd.read_csv(LIBRARY / f"{f.id}.csv", nrows=0).columns[1:]:
+            stored = FITS[(f.id, col)]
+            assert 0.04 < stored["circle_roundness"] < 2.0 and 0.0 <= stored["circle_departure"] < 1.0
+            assert len(stored["box"]["x"]) == len(stored["box"]["g"]) and stored["top_circle"]["radius"] > 0
+    valleys = FEATURES[FEATURES.feature == "valley"]
+    assert valleys.valley_kind.value_counts().to_dict() == {"glacial": 5, "river": 5}
+
+
+@pytest.mark.parametrize("fid, feature, col", library_transects()[::7])
+def test_stored_circles_are_what_the_engine_gives(fid, feature, col):
+    c = measure_transect(fid, feature, col)["circles"]
+    stored = FITS[(fid, col)]
+    assert stored["circle_roundness"] == pytest.approx(c["roundness"], abs=1e-9)
+    assert stored["circle_departure"] == pytest.approx(c["departure"], abs=1e-9)

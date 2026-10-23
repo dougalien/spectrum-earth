@@ -1700,51 +1700,21 @@ def note(msg: str):
     st.session_state.status_notes.append(msg)
 
 
-SAMPLE_FILES = {   # synthetic profiles in samples/; the Dataset Type each one suits is in its label
-    "Volcano: perfect cone (reference)": "sample_volcano_perfect_cone_reference.csv",
-    "Volcano: stratocone, Fuji-like": "sample_volcano_stratocone_fuji_like.csv",
-    "Volcano: stratocone, Mayon-like": "sample_volcano_stratocone_mayon_like.csv",
-    "Volcano: shield, Mauna Loa-like": "sample_volcano_shield_maunaloa_like.csv",
-    "Volcano: shield, Olympus Mons-like (Mars)": "sample_volcano_shield_olympus_like_mars.csv",
-    "Transect: V-shaped river valley": "sample_transect_V_fluvial.csv",
-    "Transect: U-shaped glacial valley": "sample_transect_U_glacial.csv",
-    "Transect: flat-floored trough": "sample_transect_flatfloor_trough.csv",
-    "Transect: asymmetric fault scarp": "sample_transect_asymmetric_fault.csv",
-    "Long profile: concave river": "sample_longprofile_fluvial_concave.csv",
-    "Long profile: overdeepened glacial": "sample_longprofile_glacial_overdeepened.csv",
-    # Real transects, from Spectrum Jax
-    "Real volcano: Shishaldin, clean cone": "sample_real_volcano_shishaldin_clean_cone.csv",
-    "Real volcano: Taranaki, stratovolcano": "sample_real_volcano_taranaki_stratovolcano.csv",
-    "Real volcano: Piton de la Fournaise, shield": "sample_real_volcano_pitondelafournaise_shield.csv",
-    "Real volcano: Newberry, broad with caldera": "sample_real_volcano_newberry_broad_with_caldera.csv",
-    "Real volcano: Crater Lake, caldera": "sample_real_volcano_craterlake_caldera.csv",
-    # Real mid-ocean ridge cross-sections, ETOPO1 swath medians centred on the axis (README)
-    "Real ridge: SW Indian Ridge 10°E, ultraslow (14 mm/yr)": "sample_real_ridge_swir_10e_ultraslow.csv",
-    "Real ridge: Mohns Ridge 72°N, ultraslow (16 mm/yr)": "sample_real_ridge_mohns_72n_ultraslow.csv",
-    "Real ridge: Mid-Atlantic Ridge 26°N, slow (25 mm/yr)": "sample_real_ridge_mar_26n_slow.csv",
-    "Real ridge: Mid-Atlantic Ridge 29°N, slow (24 mm/yr)": "sample_real_ridge_mar_29n_slow.csv",
-    "Real ridge: Juan de Fuca 45°N, intermediate (56 mm/yr)": "sample_real_ridge_juandefuca_45n_intermediate.csv",
-    "Real ridge: SE Indian Ridge 98°E, intermediate (70 mm/yr)": "sample_real_ridge_seir_98e_intermediate.csv",
-    "Real ridge: East Pacific Rise 12.5°N, fast (90 mm/yr)": "sample_real_ridge_epr_12n_fast.csv",
-    "Real ridge: East Pacific Rise 9.5°N, fast (110 mm/yr)": "sample_real_ridge_epr_9n_fast.csv",
-    "Real ridge: East Pacific Rise 17.5°S, superfast (145 mm/yr)": "sample_real_ridge_epr_17s_superfast.csv",
-}
+# The library of real transects: every feature, its transects and their sources are
+# listed in samples/library/ (features.csv, transects.csv) and in the README.
+LIBRARY = ideal_view.load_library(Path(__file__).resolve().parent / "samples" / "library")
+SAMPLE_FILES = {label: f"library/{f['id']}.csv" for label, f in LIBRARY.items()}
 
 
 def sample_dataset_type(label: str) -> str:
-    """The Dataset Type a sample profile suits, read from its menu label."""
-    if label.startswith("Volcano") or label.startswith("Real volcano"):
-        return TOPO_VOLCANO
-    if label.startswith("Long profile"):
-        return TOPO_LONG_PROFILE
-    return TOPO_TRANSECT
+    """The Dataset Type a library feature suits."""
+    return TOPO_VOLCANO if LIBRARY[label]["feature"] == "volcano" else TOPO_TRANSECT
 
 
 def sample_feature(label: str) -> str:
-    """The 'What is the feature?' choice a sample profile suits."""
-    if label.startswith("Real ridge"):
-        return ideal_view.RIDGE_FEATURE
-    return ideal_view.default_feature(sample_dataset_type(label), TOPO_VOLCANO, TOPO_LONG_PROFILE)
+    """The 'What is the feature?' choice a library feature suits."""
+    return {"volcano": "Hill or mountain", "valley": "Valley",
+            "ridge": ideal_view.RIDGE_FEATURE}[LIBRARY[label]["feature"]]
 
 
 def on_sample_change():
@@ -3205,9 +3175,12 @@ control_1, control_ideal = st.columns([1.25, 2.2], gap="medium")
 with control_1:
     st.markdown("**Load Data**")
     uploaded_file = st.file_uploader("Signal file", type=["csv", "txt", "xlsx"])
-    sample_choice = st.selectbox("Or try a sample profile", ["None"] + list(SAMPLE_FILES), key="sample_choice",
-                                 on_change=on_sample_change,
-                                 help="Synthetic example profiles that ship with Spectrum Earth. Choosing one sets the matching Dataset Type.")
+    sample_choice = st.selectbox("Or pick a real landform from the library", ["None"] + list(SAMPLE_FILES),
+                                 key="sample_choice", on_change=on_sample_change,
+                                 help="Real transects across 10 valleys, 10 volcanoes and 10 mid-ocean ridges, "
+                                      "from Copernicus DEM GLO-30 on land and ETOPO1 at sea. Every transect of "
+                                      "the landform is loaded; the Y Column picks the one drawn first. Choosing "
+                                      "one sets the matching Dataset Type.")
     dataset_type = st.selectbox(
         "Dataset Type",
         [TOPO_TRANSECT, TOPO_LONG_PROFILE, TOPO_VOLCANO],
@@ -3407,7 +3380,7 @@ if raw_df is None:
             <h3 style="margin-top:0;">Load a signal file to begin</h3>
             <p style="max-width:850px; margin:0 auto;">
                 Spectrum Earth works with simple x-y tables: distance and elevation across a valley, over a hill or mountain,
-                or down a river long profile. Or pick one of the sample profiles. Once a profile is loaded, it is fitted with
+                or down a river long profile. Or pick a real landform from the library. Once a profile is loaded, it is fitted with
                 perfect shapes and its departure from the ideal is measured; the Shape Chart organises many profiles by that departure.
                 For XRD, GC and SEM/EDS data, use TraceCode.
             </p>
@@ -3697,12 +3670,14 @@ with main_tabs[0]:
         ideal_item, st.session_state.x_label, st.session_state.y_label,
         st.session_state.get("source_name", ""), ridge=ridge_reading,
         feature=ideal_feature, units=(_sx, _sz), read_file=read_uploaded_file,
+        library_entry=LIBRARY.get(sample_choice) if uploaded_file is None else None,
+        library_table=raw_df if uploaded_file is None and sample_choice in LIBRARY else None,
     )
 
 with main_tabs[1]:
     ideal_view.render_shape_chart(
-        ideal_item, st.session_state.get("source_name", ""), SAMPLE_FILES,
-        sample_feature, Path(__file__).resolve().parent / "samples",
+        ideal_item, st.session_state.get("source_name", ""), LIBRARY,
+        sample_feature, Path(__file__).resolve().parent / "samples" / "library",
     )
 
 with main_tabs[2]:

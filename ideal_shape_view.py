@@ -56,7 +56,7 @@ DATASETS = {
 RATE_SOURCE = ("Full spreading rates are approximate, from the MORVEL plate motion model "
                "(DeMets, Gordon and Argus, 2010, Geophysical Journal International 181, 1-80).")
 
-# What every landform is compared with. The best fit is the curve that leaves
+# The ideal every landform is measured against. The best fit is the curve that leaves
 # the least rock out of place; the fixed triangle has nothing fitted.
 BEST = "best"
 TRIANGLE_AGAINST = ideal.TRIANGLE
@@ -295,7 +295,7 @@ modified above) are provisional: they were set from a few profiles before the re
 not from a calibrated population. They apply to the best fit only.
 
 **The fixed triangle.** With enough freedom a fitted curve might in the end match any profile, so
-every landform can also be compared with one rigid ideal that has nothing fitted. Its base runs
+every landform can also be measured against one rigid ideal that has nothing fitted. Its base runs
 between the two feet found in step 1, its apex stands at the landform's full height midway between
 the feet, and its sides are straight: an isosceles triangle in real distance (upside down for a
 valley, and one straight side from head to mouth for a long profile). The rock out of place is

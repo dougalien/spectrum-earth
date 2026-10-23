@@ -2843,7 +2843,7 @@ with _view_col:
                      help="The library shows every real transect already fitted. Fit a profile loads one "
                           "file, or one library landform, with all the controls.")
 with _against_col:
-    _against = st.radio("Compare with", list(ideal_view.AGAINST), horizontal=True, key="ideal_against",
+    _against = st.radio("Ideal shape", list(ideal_view.AGAINST), horizontal=True, key="ideal_against",
                         help=ideal_view.AGAINST_HELP)
 against = ideal_view.AGAINST[_against]
 if _view == "Explore the library":

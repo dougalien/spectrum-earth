@@ -196,7 +196,7 @@ def render_library(library: dict, library_dir: Path, against: str = ideal_view.B
     n = f"**{len(table)} real landforms, {sum(len(d) for d in table['departures'])} transects**, each "
     if tri:
         st.markdown(
-            n + "compared with the fixed triangle, which has nothing fitted: its base runs between the "
+            n + "measured against the fixed triangle, which has nothing fitted: its base runs between the "
             "two feet, its apex stands at the full height midway between them, and its sides are "
             "straight. The rock out of place, as a share of the landform's box, is its departure. "
             "Land is Copernicus DEM GLO-30, the sea floor ETOPO1; pick a landform to see its sources "

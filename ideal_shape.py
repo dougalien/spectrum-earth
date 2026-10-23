@@ -709,6 +709,22 @@ TRIANGLE_PARABOLA = 1.0 / 6.0
 TRIANGLE_NAMES = {HILL: "the fixed triangle", VALLEY: "the fixed triangle (a V)", SLOPE: "a straight slope"}
 
 
+def triangle_departure_of(g) -> float:
+    """How far a perfect shape, centred between its feet, sits from the fixed triangle: the share
+    of the box between one of its halves, g(u), and the triangle's straight side."""
+    return float(np.abs(np.asarray(g, dtype=float) - (1.0 - U)) @ _W)
+
+
+# Perfect shapes as the fixed triangle sees them. The best fit matches each one
+# exactly, so on a plot of the two departures they all sit at 0 on the best-fit
+# axis, spread along the triangle axis.
+TRIANGLE_LANDMARKS = {
+    "perfect triangle": 0.0,
+    "perfect parabola": triangle_departure_of(parabola_curve(U, 1.0)),
+    "quarter circle": triangle_departure_of(superellipse_curve(U, 2.0)),
+}
+
+
 def triangle_ideal(m: dict, halves: list) -> dict:
     """The fixed triangle on each half's own grid: 1 midway between the feet, 0 at each foot."""
     if len(halves) == 1:

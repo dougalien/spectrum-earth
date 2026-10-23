@@ -436,3 +436,15 @@ def test_a_long_profile_is_compared_with_one_straight_side():
     graded = I.as_triangle(I.measure(x, 1500.0 * I.parabola_curve(x / 20000.0, 1.0), I.SLOPE))
     assert straight["departure"] < 0.005
     assert graded["departure"] == pytest.approx(I.TRIANGLE_PARABOLA, abs=0.005)
+
+
+def test_perfect_shapes_sit_where_the_landmarks_say():
+    """A perfect parabola and a quarter circle: the best fit matches them, and the triangle sees them
+    at their landmark departures (1/6 and pi/4 - 1/2 of the box)."""
+    assert I.TRIANGLE_LANDMARKS["perfect parabola"] == pytest.approx(1.0 / 6.0, abs=1e-4)
+    assert I.TRIANGLE_LANDMARKS["quarter circle"] == pytest.approx(np.pi / 4.0 - 0.5, abs=1e-3)
+    for name, g in (("perfect parabola", lambda u: I.parabola_curve(u, 1.0)),
+                    ("quarter circle", lambda u: I.superellipse_curve(u, 2.0))):
+        item = I.measure(*two_sided(g), I.HILL)
+        assert item["departure"] < 0.005, name
+        assert item["triangle"]["departure"] == pytest.approx(I.TRIANGLE_LANDMARKS[name], abs=0.01), name

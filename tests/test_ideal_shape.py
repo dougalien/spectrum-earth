@@ -3,6 +3,7 @@ and that it treats every landform alike.
 
 Run:  py -m pytest tests
 """
+import json
 import pathlib
 import sys
 
@@ -58,6 +59,7 @@ def straight_departure(item):
 LIBRARY = ROOT / "samples" / "library"
 FEATURES = pd.read_csv(LIBRARY / "features.csv")
 KIND = {"volcano": I.HILL, "valley": I.VALLEY}
+FITS = {(r["feature_id"], r["column"]): r for r in json.loads((LIBRARY / "fits.json").read_text())}
 
 
 def transect(fid, column=None):
@@ -280,6 +282,9 @@ def test_every_library_transect_measures(fid, feature, col):
     assert 0.0 < item["fit"]["top"] <= 1.0
     assert item["departure"] <= straight_departure(item) + 1e-9
     assert I.summary_row(item, fid)
+    # The library view draws from fits.json, so it must still be what the engine gives.
+    stored = FITS[(fid, col)]
+    assert stored["ok"] and stored["departure"] == pytest.approx(item["departure"], abs=1e-9)
 
 
 def test_the_library_has_ten_of_each_and_every_transect_is_placed():

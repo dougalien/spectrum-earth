@@ -14,6 +14,7 @@ import streamlit as st
 
 import dougalien_brand as brand
 import ideal_shape_view as ideal_view
+import library_view
 
 import ai_client
 from scipy import sparse
@@ -108,7 +109,6 @@ TOPO_STATE_DEFAULTS = {
     "register_pinned": [],
     "register_pin_group": "",
     "register_backdrop": "Shaded regions",
-    "overlay_ideal": "",
 }
 
 
@@ -232,12 +232,6 @@ LANDFORM_REFERENCE_ROWS = [
 
 LANDFORM_METRIC_LABELS = {
     "v_index": "V-index  (Ax / Av - 1)",
-    "shape_conformity": "Conformity to nearest ideal (1 = ideal)",
-    "shape_departure": "Departure from ideal (0 = ideal)",
-    "form_net": "Net area vs ideal (signed, global form)",
-    "form_irregularity": "Irregularity: total area vs ideal (unsigned)",
-    "form_excess": "Area above the ideal",
-    "form_deficit": "Area below the ideal",
     "power_law_b": "Power-law exponent b  (both walls)",
     "power_law_b_left": "Power-law exponent b  (left wall)",
     "power_law_b_right": "Power-law exponent b  (right wall)",
@@ -260,12 +254,6 @@ LANDFORM_METRIC_LABELS = {
 
 LANDFORM_METRIC_UNITS = {
     "v_index": "dimensionless",
-    "shape_conformity": "dimensionless",
-    "shape_departure": "dimensionless",
-    "form_net": "fraction of ideal area",
-    "form_irregularity": "fraction of ideal area",
-    "form_excess": "fraction of ideal area",
-    "form_deficit": "fraction of ideal area",
     "power_law_b": "dimensionless",
     "power_law_b_left": "dimensionless",
     "power_law_b_right": "dimensionless",
@@ -2202,10 +2190,7 @@ def build_shape_register(n_points: int = 2001, height_fraction: float = 0.99) ->
                 continue
             v = m.get("v_index", float("nan"))
             b = m.get("power_law_b", float("nan"))
-            _cs, _cb, _cv = profile_conformity(x, z, height_fraction=height_fraction)
             rows.append({
-                "Conformity": _cv,
-                "Nearest ideal": _cb or "",
                 "Family": family,
                 "Parameter": spec["param"],
                 "Value": float(value),
@@ -2217,337 +2202,18 @@ def build_shape_register(n_points: int = 2001, height_fraction: float = 0.99) ->
                 "Fit r2": m.get("power_law_r2", float("nan")),
             })
     if not rows:
-        return pd.DataFrame(columns=["Conformity", "Nearest ideal", "Family", "Parameter",
+        return pd.DataFrame(columns=["Family", "Parameter",
                                      "Value", "b (form)", "V-index", "Width / depth",
                                      "Asymmetry", "delta (off-manifold)", "Fit r2"])
     return pd.DataFrame(rows)
 
 
 def _register_axis_pair(view: str) -> tuple[str, str, str, str]:
-    if view == "Conformity vs form":
-        return ("b (form)", "Conformity",
-                "Power-law exponent b",
-                "Conformity to nearest ideal  (1.000 = ideal)")
     if view == "Form vs aspect":
         return "b (form)", "Width / depth", "Power-law exponent b", "Width / depth ratio"
     if view == "Off-manifold vs asymmetry":
         return "Asymmetry", "delta (off-manifold)", "Asymmetry index", "delta  (V - (b-1)/(b+1))"
     return "b (form)", "delta (off-manifold)", "Power-law exponent b", "delta  (V - (b-1)/(b+1))"
-
-
-# ------------------------------------------------------------
-# Conformity to ideal sections - Wadell's logic applied to profiles.
-#
-# Wadell (1932, 1935) scored a grain against the sphere of equal volume, so a
-# perfect sphere reads 1 and nature's departure from it carries the story. The
-# same construction works on a cross-section: normalise it to the unit square,
-# fit each ideal form, and score the fit. An ideal scores exactly 1.000 against
-# itself. Everything real sits below, and HOW FAR below is the measurement.
-#
-# Verified on synthetics: a perfect V scores 1.000 on Cone/V, a parabola 1.000
-# on Parabola, a flat-floored trough 1.000 on Flat-floored. An asymmetric 3:1
-# section scores only 0.363 against the best symmetric ideal - low conformity
-# to every ideal is itself the signal that the form is irregular.
-#
-# A single free scale factor is allowed on each ideal so that a mismatch in
-# amplitude is not scored as a mismatch in SHAPE. Everything here is therefore
-# size-independent, like the rest of the register.
-# ------------------------------------------------------------
-
-IDEAL_SECTIONS = {
-    "Cone / V": lambda u: np.abs(u),
-    "Convex": lambda u: np.abs(u) ** 0.5,
-    "Parabola": lambda u: u ** 2,
-    "Semicircular arc": lambda u: 1.0 - np.sqrt(np.maximum(1.0 - u ** 2, 0.0)),
-    "Flat-floored": lambda u: np.clip((np.abs(u) - 0.5) / 0.5, 0.0, 1.0),
-    "Box trough": lambda u: np.abs(u) ** 6,
-}
-
-# The b each ideal sits at. Conformity is a magnitude and throws the SIGN of a
-# departure away: a convex shield and a concave composite can both score ~0.99
-# against Cone / V while lying on opposite sides of it. Measured through the
-# app: b = 1.184, 1.092, 1.014, 0.938, 0.891 across a convex-to-concave series
-# all returned "Cone / V" with conformity 0.958 to 1.000, while the cone index
-# ran +0.236, +0.106, +0.004, -0.094, -0.150 and separated them cleanly. So the
-# shape name carries a side, taken from b relative to the ideal's own b.
-IDEAL_SECTION_B = {
-    "Cone / V": 1.0,
-    "Convex": 0.5,
-    "Parabola": 2.0,
-    "Semicircular arc": 2.37,
-    "Flat-floored": 3.0,
-    "Box trough": 6.0,
-}
-
-IDEAL_SECTION_NOTES = {
-    "Cone / V": "Straight walls. b = 1. A fluvial V, or a straight-sided cone.",
-    "Convex": "Walls that steepen outward. b < 1. Shield-like when inverted.",
-    "Parabola": "The classic glacial trough form. b = 2.",
-    "Semicircular arc": "Curved more tightly than a parabola.",
-    "Flat-floored": "Straight walls standing on a flat floor - or a flat summit, inverted.",
-    "Box trough": "Near-vertical walls, almost rectangular.",
-}
-
-
-def profile_conformity(
-    x: np.ndarray,
-    y: np.ndarray,
-    height_fraction: float = 0.5,
-    spec_height: float | None = None,
-) -> tuple[dict, str | None, float]:
-    """Score a section against each ideal form. 1.000 means it IS that ideal.
-
-    Returns (scores by ideal, best-fitting ideal, best score). The score is a
-    coefficient of determination against the normalised section, so it can go
-    negative when a form is wildly unlike the ideal being tested.
-    """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    win = topo_valley_window(x, y, height_fraction, spec_height)
-    if win is None:
-        return {}, None, float("nan")
-
-    t, xl, xr, h, _relief = win
-    if not np.isfinite(h) or h <= 0 or xr <= xl:
-        return {}, None, float("nan")
-
-    xs = np.linspace(xl, xr, 1201)
-    zs = np.interp(xs, x, y)
-    z0 = float(np.min(zs))
-    u = (xs - 0.5 * (xl + xr)) / (0.5 * (xr - xl))
-    zn = (zs - z0) / max(h, 1e-9)
-
-    sst = float(np.sum((zn - np.mean(zn)) ** 2))
-    if sst <= 0:
-        return {}, None, float("nan")
-
-    scores = {}
-    for name, fn in IDEAL_SECTIONS.items():
-        try:
-            pred = np.asarray(fn(u), dtype=float)
-        except Exception:
-            continue
-        denom = float(np.dot(pred, pred))
-        k = float(np.dot(pred, zn) / denom) if denom > 0 else 1.0
-        ssr = float(np.sum((zn - k * pred) ** 2))
-        scores[name] = float(1.0 - ssr / sst)
-
-    if not scores:
-        return {}, None, float("nan")
-    best = max(scores, key=lambda n: scores[n])
-    return scores, best, float(scores[best])
-
-
-def shape_name_with_side(best: str | None, b_fit: float, tol: float = 0.04) -> tuple[str, str]:
-    """Name the nearest ideal and say which side of it the profile falls on.
-
-    For a valley, a b above the ideal's b means the walls are more trough-like;
-    below means more convex. On an inverted volcano profile the same wording
-    reads correctly, because the whole section was inverted before measurement.
-    Returns (full name, side word).
-    """
-    if not best:
-        return "-", ""
-    b0 = IDEAL_SECTION_B.get(best)
-    if b0 is None or not np.isfinite(b_fit) or b0 <= 0:
-        return best, ""
-    rel = (b_fit - b0) / b0
-    if abs(rel) <= tol:
-        return best, "on it"
-    side = "trough side" if rel > 0 else "convex side"
-    return f"{best}, {side}", side
-
-
-# ------------------------------------------------------------
-# Ideal overlay - draw the perfect shape on the real one and subtract.
-#
-# This is Wadell's grain construction done on a section: pin the ideal to the
-# same apex and the same base, then measure the area between them. Two numbers
-# come out of it, and they are NOT the same measurement:
-#
-#   net   = (excess - deficit) / A_ideal   - signed, global form.
-#           This reproduces the V-index exactly, because the V-index already IS
-#           this subtraction against a pinned triangle (Zimmer's construction).
-#   total = (excess + deficit) / A_ideal   - unsigned, local irregularity.
-#
-# Measured on synthetics: a cone carrying waves that preserve its area reads
-# V-index +0.0065 - indistinguishable from a perfect cone - while total reads
-# 0.0988. A terraced cone reads V-index -0.056 and total 0.142. Net area
-# cancels an excess against a deficit; the total does not.
-#
-# That is the sphericity / roundness split of grain-shape work: one number for
-# gross form, a second for how ragged the outline is. Neither substitutes for
-# the other.
-# ------------------------------------------------------------
-
-def ideal_overlay(
-    x: np.ndarray,
-    y: np.ndarray,
-    ideal_name: str = "Cone / V",
-    height_fraction: float = 0.5,
-    spec_height: float | None = None,
-) -> tuple[dict, dict]:
-    """Fit the named ideal over the section and split the difference in two.
-
-    The ideal is pinned to the measured section: same thalweg, same base, same
-    height. A single scale factor is allowed so an amplitude mismatch is not
-    charged as a shape mismatch.
-
-    Returns (metrics, curves). curves carries the arrays needed to draw the
-    overlay: distance, the real section, the ideal, and the two signed parts.
-    """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    fn = IDEAL_SECTIONS.get(ideal_name)
-    if fn is None:
-        return {}, {}
-
-    win = topo_valley_window(x, y, height_fraction, spec_height)
-    if win is None:
-        return {}, {}
-    t, xl, xr, h, _relief = win
-    if not np.isfinite(h) or h <= 0 or xr <= xl:
-        return {}, {}
-
-    xs = np.linspace(xl, xr, 2001)
-    zs = np.interp(xs, x, y)
-    z0 = float(np.min(zs))
-    u = (xs - 0.5 * (xl + xr)) / (0.5 * (xr - xl))
-    zn = (zs - z0) / max(h, 1e-9)
-
-    try:
-        ideal = np.asarray(fn(u), dtype=float)
-    except Exception:
-        return {}, {}
-    denom = float(np.dot(ideal, ideal))
-    k = float(np.dot(ideal, zn) / denom) if denom > 0 else 1.0
-    ideal = k * ideal
-
-    diff = zn - ideal
-    excess = float(np.trapezoid(np.clip(diff, 0.0, None), u))
-    deficit = float(np.trapezoid(np.clip(-diff, 0.0, None), u))
-    a_ideal = float(np.trapezoid(ideal, u))
-    if not np.isfinite(a_ideal) or abs(a_ideal) < 1e-12:
-        return {}, {}
-
-    metrics = {
-        "form_excess": excess / a_ideal,
-        "form_deficit": deficit / a_ideal,
-        "form_net": (excess - deficit) / a_ideal,
-        "form_irregularity": (excess + deficit) / a_ideal,
-    }
-    curves = {
-        "u": u,
-        "section": zn,
-        "ideal": ideal,
-        "x_real": xs,
-        "z_real": zs,
-        "z_ideal": z0 + ideal * max(h, 1e-9),
-        "ideal_name": ideal_name,
-    }
-    return metrics, curves
-
-
-def make_overlay_plot(curves: dict, metrics: dict, inverted: bool = False):
-    """The real section with the ideal drawn over it, difference shaded.
-
-    Excess and deficit are a polarity, so they take the diverging pair - blue
-    against red with a neutral midpoint - rather than two categorical hues.
-    """
-    fig = go.Figure()
-    if not curves:
-        return fig
-
-    xr_ = curves["x_real"]
-    zr = curves["z_real"]
-    zi = curves["z_ideal"]
-    if inverted:
-        zr = -zr
-        zi = -zi
-
-    upper = np.maximum(zr, zi)
-    lower = np.minimum(zr, zi)
-
-    fig.add_trace(go.Scatter(
-        x=xr_, y=zi, mode="lines", name=f"ideal: {curves['ideal_name']}",
-        line=dict(width=2, color="#52514e", dash="dash"),
-        hovertemplate="ideal %{y:.4g}<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=xr_, y=np.where(zr >= zi, zr, zi), mode="lines",
-        line=dict(width=0), showlegend=False, hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=xr_, y=zi, mode="lines", fill="tonexty",
-        fillcolor="rgba(42,120,214,0.30)",
-        line=dict(width=0), name="excess (above ideal)",
-        hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=xr_, y=np.where(zr <= zi, zr, zi), mode="lines",
-        line=dict(width=0), showlegend=False, hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=xr_, y=zi, mode="lines", fill="tonexty",
-        fillcolor="rgba(208,59,59,0.30)",
-        line=dict(width=0), name="deficit (below ideal)",
-        hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=xr_, y=zr, mode="lines", name="measured section",
-        line=dict(width=3, color="#0b0b0b"),
-        hovertemplate="measured %{y:.4g}<extra></extra>",
-    ))
-
-    net = metrics.get("form_net", float("nan"))
-    tot = metrics.get("form_irregularity", float("nan"))
-    fig.update_layout(
-        title=(f"Ideal overlaid on the section - net {net:+.3f}, irregularity {tot:.3f} "
-               "(both as a fraction of the ideal's area)"),
-        xaxis_title="Distance", yaxis_title="Elevation",
-        template="plotly_white", height=470,
-        margin=dict(l=20, r=20, t=70, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.22, xanchor="left", x=0),
-        hovermode="x unified",
-    )
-    fig.update_xaxes(gridcolor="#eceae4", zeroline=False)
-    fig.update_yaxes(gridcolor="#eceae4", zeroline=False)
-    return fig
-
-
-def make_conformity_bars(scores: dict, best: str | None = None):
-    """How close this section comes to each ideal. The 1.000 line is the ideal."""
-    fig = go.Figure()
-    if not scores:
-        return fig
-    names = list(scores.keys())
-    vals = [scores[n] for n in names]
-    order = np.argsort(vals)
-    names = [names[i] for i in order]
-    vals = [vals[i] for i in order]
-    colours = ["#2a78d6" if n == best else "#b9c6d8" for n in names]
-    fig.add_trace(go.Bar(
-        x=vals, y=names, orientation="h",
-        marker=dict(color=colours, line=dict(width=0)),
-        text=[f"{v:.3f}" for v in vals], textposition="outside",
-        textfont=dict(size=12, color="#0b0b0b"),
-        hovertemplate="<b>%{y}</b><br>conformity %{x:.3f}<extra></extra>",
-        showlegend=False,
-    ))
-    fig.add_vline(x=1.0, line=dict(color="#52514e", width=2))
-    fig.add_annotation(x=1.0, y=1.04, yref="paper", text="ideal = 1.000",
-                       showarrow=False, font=dict(size=11, color="#52514e"))
-    lo = min(min(vals), 0.0)
-    fig.update_layout(
-        title="Conformity to each ideal section",
-        xaxis_title="Conformity  (1.000 = this profile IS that ideal)",
-        template="plotly_white", height=360,
-        margin=dict(l=20, r=70, t=60, b=20),
-        xaxis=dict(range=[lo - 0.12, 1.22], gridcolor="#eceae4", zeroline=False),
-        yaxis=dict(gridcolor="#eceae4"),
-        bargap=0.35,
-    )
-    return fig
 
 
 # ------------------------------------------------------------
@@ -3168,6 +2834,17 @@ st.markdown(
 )
 
 # -----------------------------
+# The library of real transects (the default view), or one profile
+# -----------------------------
+_view = st.radio("View", ["Explore the library", "Fit a profile"], horizontal=True, key="app_view",
+                 label_visibility="collapsed",
+                 help="The library shows every real transect already fitted. Fit a profile loads one "
+                      "file, or one library landform, with all the controls.")
+if _view == "Explore the library":
+    library_view.render_library(LIBRARY, Path(__file__).resolve().parent / "samples" / "library")
+    st.stop()
+
+# -----------------------------
 # Top control band
 # -----------------------------
 control_1, control_ideal = st.columns([1.25, 2.2], gap="medium")
@@ -3611,40 +3288,6 @@ if st.session_state.dataset_type in TOPO_DATASET_TYPES and peak_results is not N
                 match_quantile=_mq,
             )
 
-
-        # Conformity runs on the same orientation the metrics used: a volcano is
-        # measured inverted, so its section must be scored inverted too.
-        _conf_scores, _conf_best, _conf_val = {}, None, float("nan")
-        if st.session_state.dataset_type in (TOPO_TRANSECT, TOPO_VOLCANO):
-            _cy = -y_metric if st.session_state.dataset_type == TOPO_VOLCANO else y_metric
-            try:
-                _conf_scores, _conf_best, _conf_val = profile_conformity(
-                    x, _cy,
-                    height_fraction=float(st.session_state.topo_height_fraction),
-                    spec_height=spec_h,
-                )
-            except Exception:
-                _conf_scores, _conf_best, _conf_val = {}, None, float("nan")
-            if np.isfinite(_conf_val):
-                topo_metrics["shape_conformity"] = float(_conf_val)
-                topo_metrics["shape_departure"] = float(1.0 - _conf_val)
-        _ov_metrics, _ov_curves = {}, {}
-        if _conf_best and st.session_state.dataset_type in (TOPO_TRANSECT, TOPO_VOLCANO):
-            try:
-                _ov_metrics, _ov_curves = ideal_overlay(
-                    x, _cy, _conf_best,
-                    height_fraction=float(st.session_state.topo_height_fraction),
-                    spec_height=spec_h,
-                )
-                topo_metrics.update(_ov_metrics)
-            except Exception:
-                _ov_metrics, _ov_curves = {}, {}
-        st.session_state["overlay_metrics"] = _ov_metrics
-        st.session_state["overlay_curves"] = _ov_curves
-
-        st.session_state["conformity_scores"] = _conf_scores
-        st.session_state["conformity_best"] = _conf_best
-        st.session_state["conformity_value"] = _conf_val
 
         for _msg in topo_notes:
             note(_msg)
@@ -4106,99 +3749,9 @@ with tabs[7]:
                      if _tm.get("height_basal_width_ratio") else np.nan),
                     "Asymmetry": float(_tm.get("asymmetry_index", np.nan)),
                     "delta (off-manifold)": shape_register_delta(float(_v), float(_b)),
-                    "Conformity": float(st.session_state.get("conformity_value", np.nan)),
-                    "Nearest ideal": st.session_state.get("conformity_best") or "",
                 }
                 if st.session_state.dataset_type == TOPO_VOLCANO:
                     measured_label = "This edifice"
-
-        _cscores = st.session_state.get("conformity_scores") or {}
-        if _cscores:
-            st.markdown("**Shape name and departure from the ideal**")
-            _cbest = st.session_state.get("conformity_best")
-            _cval = float(st.session_state.get("conformity_value", np.nan))
-            _c1, _c2 = st.columns([1.0, 1.4], gap="large")
-            with _c1:
-                _bfit = float((st.session_state.get("topo_metrics") or {}).get("power_law_b", np.nan))
-                _fullname, _side = shape_name_with_side(_cbest, _bfit)
-                if np.isfinite(_cval):
-                    st.metric("Shape name", _fullname,
-                              help="The nearest ideal section, and which side of it this profile "
-                                   "falls on. Conformity is a magnitude and cannot supply the "
-                                   "side on its own.")
-                    st.metric("Conformity", f"{_cval:.3f}",
-                              delta=f"{_cval - 1.0:+.3f} from ideal", delta_color="off")
-                    st.caption(IDEAL_SECTION_NOTES.get(_cbest, ""))
-                    if _side and _side != "on it":
-                        st.caption(
-                            f"b = {_bfit:.3f} against the ideal's {IDEAL_SECTION_B.get(_cbest, float('nan')):.2f}. "
-                            "Two profiles can score the same conformity on opposite sides of an "
-                            "ideal - a convex shield and a concave composite both read close to "
-                            "Cone / V - so the side is the part that separates them."
-                        )
-                    if _cval >= 0.98:
-                        st.success("Essentially indistinguishable from the ideal form.")
-                    elif _cval >= 0.90:
-                        st.info("Close to the ideal, with a measurable departure.")
-                    elif _cval >= 0.70:
-                        st.warning("Departs clearly from every ideal section.")
-                    else:
-                        st.warning(
-                            "Low conformity to EVERY symmetric ideal. That is itself the reading: "
-                            "the section is irregular or strongly asymmetric. Check the asymmetry "
-                            "index before naming it."
-                        )
-            with _c2:
-                st.plotly_chart(make_conformity_bars(_cscores, _cbest), width="stretch")
-
-            st.markdown("**Ideal overlaid on the section**")
-            st.caption(
-                "The ideal is pinned to the same thalweg, the same base and the same height, then "
-                "subtracted - the grain-shape construction. Blue is rock ABOVE the ideal, red is "
-                "rock MISSING relative to it. Two numbers come out and they measure different "
-                "things: NET is signed and describes gross form (it reproduces the V-index, which "
-                "is this same subtraction against a triangle), while IRREGULARITY is unsigned and "
-                "describes how ragged the section is. A cone carrying waves that preserve its area "
-                "reads net +0.007 - a perfect cone - but irregularity 0.099."
-            )
-            _ov_names = list(IDEAL_SECTIONS.keys())
-            _ov_default = _cbest if _cbest in _ov_names else _ov_names[0]
-            _ov_pick = st.selectbox(
-                "Overlay which ideal?", _ov_names,
-                index=_ov_names.index(_ov_default), key="overlay_ideal_pick",
-                help="Defaults to the nearest-fitting ideal. Pick another to see how the "
-                     "difference changes.",
-            )
-            _ov_y = -y_metric if st.session_state.dataset_type == TOPO_VOLCANO else y_metric
-            try:
-                _ovm, _ovc = ideal_overlay(
-                    x, _ov_y, _ov_pick,
-                    height_fraction=float(st.session_state.topo_height_fraction),
-                    spec_height=spec_h if "spec_h" in dir() else None,
-                )
-            except Exception:
-                _ovm, _ovc = {}, {}
-            if _ovc:
-                st.plotly_chart(
-                    make_overlay_plot(_ovc, _ovm,
-                                      inverted=(st.session_state.dataset_type == TOPO_VOLCANO)),
-                    width="stretch",
-                )
-                _o1, _o2, _o3, _o4 = st.columns(4)
-                _o1.metric("Net (signed)", f"{_ovm.get('form_net', float('nan')):+.4f}",
-                           help="Gross form. Positive means more material than the ideal.")
-                _o2.metric("Irregularity", f"{_ovm.get('form_irregularity', float('nan')):.4f}",
-                           help="How ragged. Zero only if the section IS the ideal.")
-                _o3.metric("Excess area", f"{_ovm.get('form_excess', float('nan')):.4f}")
-                _o4.metric("Deficit area", f"{_ovm.get('form_deficit', float('nan')):.4f}")
-                st.caption(
-                    "All four are fractions of the ideal's own area, so they are size-independent. "
-                    "Net and irregularity are independent readings: a section can have net zero "
-                    "and large irregularity, which is the difference between sphericity and "
-                    "roundness in grain work."
-                )
-            else:
-                st.info("The overlay could not be fitted for this profile.")
 
         st.markdown("---")
 
@@ -4206,7 +3759,7 @@ with tabs[7]:
         with _vcol:
             view = st.radio(
                 "Register view",
-                ["Form vs aspect", "Conformity vs form", "Off-manifold vs form",
+                ["Form vs aspect", "Off-manifold vs form",
                  "Off-manifold vs asymmetry"],
                 horizontal=True,
                 key="register_view",
@@ -4345,13 +3898,11 @@ with tabs[7]:
                     "Width / depth": _p.get("Width / depth", float("nan")),
                     "Asymmetry": _p.get("Asymmetry", float("nan")),
                     "delta (off-manifold)": _p.get("delta (off-manifold)", float("nan")),
-                    "Conformity": _p.get("Conformity", float("nan")),
-                    "Nearest ideal": _p.get("Nearest ideal", ""),
                 })
             _pdf = pd.DataFrame(_prows)
             _pshow = _pdf.copy()
             for _c in ("b (form)", "V-index", "Width / depth", "Asymmetry",
-                       "delta (off-manifold)", "Conformity"):
+                       "delta (off-manifold)"):
                 _pshow[_c] = _pshow[_c].map(lambda v: f"{v:.4f}" if np.isfinite(v) else "")
             st.dataframe(_pshow, width="stretch", hide_index=True)
 
@@ -4443,7 +3994,7 @@ with tabs[7]:
         )
         _show = register_df.copy()
         for _c in ("b (form)", "V-index", "Width / depth", "Asymmetry",
-                   "delta (off-manifold)", "Fit r2", "Conformity"):
+                   "delta (off-manifold)", "Fit r2"):
             _show[_c] = _show[_c].map(lambda v: f"{v:.4f}" if np.isfinite(v) else "")
         st.dataframe(_show, width="stretch")
         st.download_button(

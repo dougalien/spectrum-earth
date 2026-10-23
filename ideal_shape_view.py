@@ -126,31 +126,11 @@ def _num(v: float) -> str:
 # =====================================================================
 # The plot of the fit
 # =====================================================================
-def _real_halves(item: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(distance, real elevation, ideal elevation) across both halves, left to right."""
-    m = item["m"]
-    xs, zr, zi = [], [], []
-    for h in item["halves"]:
-        x = m["x_apex"] + h["sign"] * ideal.U * h["radius"]
-        z_real = h["base"] + h["g"] * h["height"]
-        z_ideal = h["base"] + item["ideal"][h["side"]] * h["height"]
-        if item["kind"] == ideal.VALLEY:
-            z_real, z_ideal = -z_real, -z_ideal
-        if h["sign"] < 0:
-            x, z_real, z_ideal = x[::-1], z_real[::-1], z_ideal[::-1]
-        xs.append(x)
-        zr.append(z_real)
-        zi.append(z_ideal)
-    order = np.argsort([a[0] for a in xs])
-    return (np.concatenate([xs[i] for i in order]), np.concatenate([zr[i] for i in order]),
-            np.concatenate([zi[i] for i in order]))
-
-
 def overlay_figure(item: dict, x_label: str, y_label: str, title: str = "", height: int = 470,
                    axis: float | None = None, legend: bool = True):
     """The real profile with its ideal drawn on it, extra and missing rock shaded."""
     fig = go.Figure()
-    x, zr, zi = _real_halves(item)
+    x, zr, zi = ideal.drawn_halves(item)
     pad = 0.15 * (item["m"]["x_right"] - item["m"]["x_left"])
     sel = (item["x"] >= item["m"]["x_left"] - pad) & (item["x"] <= item["m"]["x_right"] + pad)
     fig.add_trace(go.Scatter(

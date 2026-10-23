@@ -815,6 +815,26 @@ def average(items: list) -> dict:
             "lo": float(d.min()), "hi": float(d.max())}
 
 
+def drawn_halves(item: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(distance, real elevation, ideal elevation) across both halves, left to right."""
+    m = item["m"]
+    xs, zr, zi = [], [], []
+    for h in item["halves"]:
+        x = m["x_apex"] + h["sign"] * U * h["radius"]
+        z_real = h["base"] + h["g"] * h["height"]
+        z_ideal = h["base"] + item["ideal"][h["side"]] * h["height"]
+        if item["kind"] == VALLEY:
+            z_real, z_ideal = -z_real, -z_ideal
+        if h["sign"] < 0:
+            x, z_real, z_ideal = x[::-1], z_real[::-1], z_ideal[::-1]
+        xs.append(x)
+        zr.append(z_real)
+        zi.append(z_ideal)
+    order = np.argsort([a[0] for a in xs])
+    return (np.concatenate([xs[i] for i in order]), np.concatenate([zr[i] for i in order]),
+            np.concatenate([zi[i] for i in order]))
+
+
 def summary_row(item: dict, label: str = "", group: str = "") -> dict:
     """One flat row for the shape chart and the table."""
     if not item.get("ok"):

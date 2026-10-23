@@ -442,6 +442,14 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, r
                 f"{words['feature']}"
                 + (f", level across {item['level']:.0%} of the width" if item["flat"] else "") + "."
             )
+        if item.get("circles"):
+            c = item["circles"]
+            st.caption(
+                f"Two circles: roundness of the {words['apex']} {c['roundness']:.2f} (the circle through it and "
+                "the two points a tenth of the height away, as a share of the semicircle's radius), and "
+                f"departure from the semicircle {c['departure']:.0%} (the rock out of place against the "
+                "semicircle through both feet and the top, as a share of the semicircle)."
+            )
         for n in item.get("notes", []):
             st.info(n)
     if read_file is not None and feature:

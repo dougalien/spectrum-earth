@@ -2,7 +2,9 @@
 
 The app's library view draws from this file, so it opens at once instead of
 fitting 100 transects (about a second each) on every start. Each transect
-carries both comparisons, its best fit and the fixed triangle. Every number in
+carries both comparisons, its best fit and the fixed triangle, and its two
+circles (roundness of the top or floor, departure from the semicircle) with
+the profile in its box for drawing them. Every number in
 it comes from ideal_shape.py by the one fixed procedure; tests/ re-fits every
 transect and checks the file still matches, so it cannot drift from the engine.
 
@@ -20,6 +22,16 @@ import ideal_shape as ideal  # noqa: E402
 
 LIB = ROOT / "samples" / "library"
 N_DRAW = 300
+N_BOX = 101  # points per half of the profile in its box
+
+
+def in_box(item: dict) -> dict:
+    """Both halves in the box, left to right (left half at negative x), thinned for drawing."""
+    hs = sorted(item["halves"], key=lambda h: h["sign"])
+    keep = np.unique(np.linspace(0, len(ideal.U) - 1, N_BOX).round().astype(int))
+    u, gl, gr = ideal.U[keep], hs[0]["g"][keep], hs[1]["g"][keep]
+    return {"x": np.concatenate([-u[::-1], u[1:]]).round(4).tolist(),
+            "g": np.concatenate([gl[::-1], gr[1:]]).round(4).tolist()}
 
 
 def fit(x, z, feature: str) -> tuple[dict, dict | None]:
@@ -61,12 +73,22 @@ def main():
                     "profile_x": x[sel].round(1).tolist(), "profile_z": z[sel].round(1).tolist(),
                     **drawn(item),
                 })
+                c = item["circles"]
+                row.update({
+                    "circle_roundness": c["roundness"], "circle_departure": c["departure"],
+                    "circle_extra": c["extra"], "circle_missing": c["missing"],
+                    "top_circle": {k: c["circle"][k] for k in ("x", "y", "radius")}
+                    | {"points": [list(p) for p in c["circle"]["points"]]},
+                    "box": in_box(item),
+                })
             if ridge is not None:
                 row.update({"axis": ridge["axis"], "axis_type": ridge["axis_type"],
                             "rate_words": ridge["rate_words"]})
             out.append(row)
             print(f.id, col, f"{row.get('departure', float('nan')) * 100:.2f}%",
-                  f"triangle {row.get('tri_departure', float('nan')) * 100:.2f}%")
+                  f"triangle {row.get('tri_departure', float('nan')) * 100:.2f}%",
+                  f"roundness {row.get('circle_roundness', float('nan')):.3f}",
+                  f"semicircle {row.get('circle_departure', float('nan')) * 100:.1f}%")
     (LIB / "fits.json").write_text(json.dumps(out, separators=(",", ":")))
 
 

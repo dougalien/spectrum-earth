@@ -175,6 +175,153 @@ def single_figure(r: dict, title: str):
     return fig
 
 
+def two_ideals(library: dict, fits: list) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Every transect's departure from both ideals, and each landform's averages of the two."""
+    names = {f["id"]: (f["name"], f["feature"]) for f in library.values()}
+    t = pd.DataFrame([{"id": r["feature_id"], "column": r["column"], "best": r["departure"],
+                       "triangle": r["tri_departure"]} for r in fits if r.get("ok") and r["feature_id"] in names])
+    t["Landform"] = t["id"].map(lambda i: names[i][0])
+    t["group"] = t["id"].map(lambda i: names[i][1])
+    lf = t.groupby(["id", "Landform", "group"], as_index=False)[["best", "triangle"]].mean()
+    lf["best rank"] = lf["best"].rank(method="min").astype(int)
+    lf["triangle rank"] = lf["triangle"].rank(method="min").astype(int)
+    return t, lf
+
+
+SHORT_NAMES = (("Mid-Atlantic Ridge", "MAR"), ("East Pacific Rise", "EPR"), ("SW Indian Ridge", "SWIR"),
+               ("SE Indian Ridge", "SEIR"), ("Juan de Fuca Ridge", "Juan de Fuca"), ("Mohns Ridge", "Mohns"),
+               ("Black Canyon of the Gunnison", "Black Canyon"), ("Piton de la Fournaise", "Fournaise"),
+               ("Mount ", ""), (" Valley", ""))
+
+
+def short_name(name: str) -> str:
+    """A landform's name short enough to label a dot: 'Mid-Atlantic Ridge 23°N' becomes 'MAR 23°N'."""
+    name = name.split(" (")[0]
+    for long, short in SHORT_NAMES:
+        name = name.replace(long, short)
+    return name
+
+
+# Where a label can sit beside its dot, as plotly names it and as a box offset in
+# pixels from the dot (left, bottom), for a label w pixels wide and 12 high.
+_PLACES = (("middle right", lambda w: (8, -6)), ("middle left", lambda w: (-8 - w, -6)),
+           ("top center", lambda w: (-w / 2, 7)), ("bottom center", lambda w: (-w / 2, -19)),
+           ("top right", lambda w: (4, 4)), ("bottom right", lambda w: (4, -16)),
+           ("top left", lambda w: (-4 - w, 4)), ("bottom left", lambda w: (-4 - w, -16)))
+
+
+def label_places(x, y, labels, x_range, y_range, size=(1150.0, 520.0)) -> list:
+    """A place beside each dot for its label, chosen so labels cover as little as they can of the
+    dots and of each other: each label takes the first place that is clear, or the least covered."""
+    sx, sy = size[0] / (x_range[1] - x_range[0]), size[1] / (y_range[1] - y_range[0])
+    px, py = (np.asarray(x) - x_range[0]) * sx, (np.asarray(y) - y_range[0]) * sy
+    taken = [(a - 6, b - 6, a + 6, b + 6) for a, b in zip(px, py)]
+
+    def covered(box):
+        return sum(max(0.0, min(box[2], t[2]) - max(box[0], t[0])) * max(0.0, min(box[3], t[3]) - max(box[1], t[1]))
+                   for t in taken)
+
+    out = [""] * len(labels)
+    for i in np.argsort(px):
+        w = 5.6 * len(labels[i])
+        best = None
+        for name, offset in _PLACES:
+            dx, dy = offset(w)
+            box = (px[i] + dx, py[i] + dy, px[i] + dx + w, py[i] + dy + 12)
+            if box[0] < 0 or box[2] > size[0]:
+                continue
+            c = covered(box)
+            if best is None or c < best[0]:
+                best = (c, name, box)
+            if c == 0:
+                break
+        out[i] = best[1]
+        taken.append(best[2])
+    return out
+
+
+def rank_agreement(lf: pd.DataFrame) -> float:
+    """How closely the two orders agree: 1 the same order, 0 unrelated (Spearman's rank correlation)."""
+    if len(lf) < 3:
+        return float("nan")
+    return float(lf["best"].rank().corr(lf["triangle"].rank()))
+
+
+def two_ideals_figure(t: pd.DataFrame, lf: pd.DataFrame):
+    """Each landform's departure from the best-fit curve against its departure from the fixed triangle.
+
+    How far below the line where the two are equal a landform sits is the rock
+    that bending the sides, levelling the top and moving the summit account for.
+    """
+    hi = max([ideal.TRIANGLE_PARABOLA * 1.15] + list(t["triangle"] * 1.05)) * 100.0
+    top = max([0.06] + list(t["best"] * 1.1)) * 100.0
+    names = [short_name(n) for n in lf["Landform"]]
+    places = dict(zip(lf["id"], label_places(lf["triangle"] * 100, lf["best"] * 100, names, (0, hi), (0, top))))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[0, hi], y=[0, hi], mode="lines", line=dict(color=ideal_view.MUTED, width=1, dash="dash"),
+                             name="the two equal", hoverinfo="skip"))
+    fig.add_vline(x=ideal.TRIANGLE_PARABOLA * 100.0, line=dict(color=ideal_view.INK_2, width=1, dash="dot"),
+                  annotation_text=ideal_view.TRIANGLE_LINE, annotation_position="top",
+                  annotation_font=dict(size=11, color=ideal_view.INK_2))
+    for g, words in GROUPS.items():
+        c = GROUP_COLOURS[g]
+        tg, lg = t[t["group"] == g], lf[lf["group"] == g]
+        if lg.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=tg["triangle"] * 100, y=tg["best"] * 100, mode="markers", legendgroup=g, showlegend=False,
+            marker=dict(size=6, color=c, opacity=0.3), customdata=tg[["Landform", "column"]],
+            hovertemplate="%{customdata[0]}, %{customdata[1]}<br>triangle %{x:.1f}%, best fit %{y:.1f}%<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=lg["triangle"] * 100, y=lg["best"] * 100, mode="markers+text", name=words, legendgroup=g,
+            text=[short_name(n) for n in lg["Landform"]], textposition=[places[i] for i in lg["id"]],
+            textfont=dict(size=10, color=ideal_view.INK_2),
+            marker=dict(size=11, color=c, line=dict(width=1.5, color="#fcfcfb")),
+            customdata=lg[["Landform", "triangle rank", "best rank"]],
+            hovertemplate=("<b>%{customdata[0]}</b><br>fixed triangle %{x:.1f}% (rank %{customdata[1]})"
+                           "<br>best-fit curve %{y:.1f}% (rank %{customdata[2]})<extra></extra>"),
+        ))
+    ideal_view._layout(fig, "Departure from the best-fit curve against departure from the fixed triangle", 660)
+    fig.update_layout(margin=dict(l=20, r=20, t=70, b=40),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0))
+    fig.update_xaxes(title="departure from the fixed triangle, % of the box", range=[0, hi])
+    fig.update_yaxes(title="departure from the best-fit curve, % of the box", range=[0, top])
+    return fig
+
+
+def render_two_ideals(library: dict, fits: list):
+    """The panel that sets the two ideals side by side: where each landform falls on both."""
+    t, lf = two_ideals(library, fits)
+    if lf.empty:
+        return
+    st.markdown("#### The two ideals, plotted against each other")
+    st.plotly_chart(two_ideals_figure(t, lf), width="stretch")
+    rho = rank_agreement(lf)
+    st.caption(
+        "Each large dot is a landform's average, each faint dot one transect. Every transect in the "
+        "library is closer to its best fit than to the triangle, so all sit below the dashed line where "
+        "the two are equal, and how far below it a landform sits is the rock that bending the sides, "
+        "levelling the top and moving the summit account for. Low and to the right: smooth but bowed or lopsided "
+        "shapes that a curve fits closely and the triangle does not. Higher up: rough or irregular "
+        "profiles that no smooth curve fits."
+        + (f" The two orders agree only loosely (rank agreement {rho:.2f}, where 1 is the same order and "
+           "0 unrelated), so the two numbers measure different things." if np.isfinite(rho) and rho < 0.7 else
+           f" Rank agreement between the two orders: {rho:.2f} (1 is the same order, 0 unrelated)."
+           if np.isfinite(rho) else "")
+    )
+    with st.expander("Each landform's place in both orders", expanded=False):
+        show = lf.sort_values("triangle")[["Landform", "triangle", "triangle rank", "best", "best rank"]].copy()
+        d = show["best rank"] - show["triangle rank"]
+        show["On the best fit"] = [("same place" if v == 0 else f"{abs(v)} place{'s' if abs(v) > 1 else ''} "
+                                    + ("further down" if v > 0 else "further up")) for v in d]
+        show["triangle"] = show["triangle"].map(_pct)
+        show["best"] = show["best"].map(_pct)
+        show.columns = ["Landform", "Fixed triangle", "Place (triangle)", "Best-fit curve", "Place (best fit)",
+                        "On the best fit"]
+        st.dataframe(show, width="stretch", hide_index=True)
+
+
 def _summary_table(t: pd.DataFrame, against: str = ideal_view.BEST):
     cols = ["Landform", "Group", "Transects", "Average departure", "Spread (sd)", "Lowest", "Highest"]
     show = t.sort_values("Average departure")[cols + ([] if against == ideal.TRIANGLE else ["Grade"])].copy()
@@ -185,7 +332,8 @@ def _summary_table(t: pd.DataFrame, against: str = ideal_view.BEST):
 
 
 def render_library(library: dict, library_dir: Path, against: str = ideal_view.BEST):
-    fits = read_against(load_fits(str(library_dir / "fits.json")), against)
+    stored = load_fits(str(library_dir / "fits.json"))
+    fits = read_against(stored, against)
     if not library or not fits:
         st.warning("The transect library could not be read.")
         return
@@ -240,6 +388,7 @@ def render_library(library: dict, library_dir: Path, against: str = ideal_view.B
                     "The shaded bands are the provisional grades. ") + "Hover a dot for its transect.")
         with st.expander("The numbers, landform by landform", expanded=False):
             _summary_table(in_group, against)
+        render_two_ideals({k: v for k, v in library.items() if v["id"] in set(in_group["id"])}, stored)
         st.markdown(f"#### Every transect ({len(rows)}), with " + ("the fixed triangle" if tri else "its ideal"))
         st.caption("Blue is extra rock above the ideal, red is missing rock below it, the grey line is "
                    "the ground beyond the feet, and on a ridge the dotted line is the spreading axis. "

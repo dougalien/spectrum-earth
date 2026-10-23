@@ -6,7 +6,8 @@ with the same single procedure the rest of the app uses (ideal_shape.py), so
 the view opens at once. By default it shows the whole library: every landform's
 transects and their average departure, then every transect's fit. A group
 (volcanoes, valleys or ridges), one landform, or one transect can be picked
-instead.
+instead. Every transect is stored against both ideals, its best fit and the
+fixed triangle, and the view shows the one chosen at the top of the app.
 """
 
 from __future__ import annotations
@@ -36,11 +37,25 @@ def load_fits(path: str) -> list:
         return []
 
 
+def read_against(fits: list, against: str) -> list:
+    """The library rows read against the chosen ideal: as stored for the best fit, or with the
+    fixed triangle's line and numbers in place of the best fit's."""
+    if against != ideal.TRIANGLE:
+        return fits
+    out = []
+    for r in fits:
+        if r.get("ok"):
+            r = {**r, "departure": r["tri_departure"], "extra": r["tri_extra"], "missing": r["tri_missing"],
+                 "ideal": r["triangle"], "grade": "", "against": ideal.TRIANGLE}
+        out.append(r)
+    return out
+
+
 def _pct(v: float) -> str:
     return f"{v * 100:.1f}%" if np.isfinite(v) else "-"
 
 
-def summary(library: dict, fits: list) -> pd.DataFrame:
+def summary(library: dict, fits: list, against: str = ideal_view.BEST) -> pd.DataFrame:
     """One row per landform: its group, transects fitted and their average departure."""
     by_id = {}
     for r in fits:
@@ -56,28 +71,19 @@ def summary(library: dict, fits: list) -> pd.DataFrame:
             "Spread (sd)": float(d.std(ddof=1)) if len(d) > 1 else 0.0,
             "Lowest": float(d.min()) if len(d) else np.nan,
             "Highest": float(d.max()) if len(d) else np.nan,
-            "Grade": ideal.departure_class(float(d.mean())) if len(d) else "",
+            "Grade": ideal_view.average_grade(float(d.mean()), against) if len(d) else "",
             "departures": d.tolist(), "columns": [r["column"] for r in rs],
         })
     return pd.DataFrame(rows)
 
 
-def overview_figure(table: pd.DataFrame):
+def overview_figure(table: pd.DataFrame, against: str = ideal_view.BEST):
     """Every landform, lowest average departure at the top: each transect a dot, the average a bar."""
     t = table.dropna(subset=["Average departure"]).sort_values("Average departure")
     fig = go.Figure()
-    top = max([0.06] + [max(d) * 1.08 for d in t["departures"] if d]) * 100.0
-    lo = 0.0
-    shades = ["rgba(27,175,122,0.07)", "rgba(237,161,0,0.06)", "rgba(235,104,52,0.06)",
-              "rgba(208,59,59,0.06)"]
-    for i, ((limit, words), shade) in enumerate(zip(ideal.DEPARTURE_CLASSES, shades)):
-        if lo >= top:
-            break
-        hi = min(limit * 100.0, top)
-        fig.add_vrect(x0=lo, x1=hi, fillcolor=shade, line_width=0, layer="below",
-                      annotation_text=words, annotation_position="top left" if i % 2 == 0 else "bottom left",
-                      annotation_font=dict(size=11, color=ideal_view.INK_2))
-        lo = hi
+    floor = ideal.TRIANGLE_PARABOLA * 1.15 if against == ideal.TRIANGLE else 0.06
+    top = max([floor] + [max(d) * 1.08 for d in t["departures"] if d]) * 100.0
+    ideal_view.departure_bands(fig, top, against)
     seen = set()
     for r in t.to_dict("records"):
         c = GROUP_COLOURS[r["group"]]
@@ -96,7 +102,8 @@ def overview_figure(table: pd.DataFrame):
                            f"over {r['Transects']} transects<extra></extra>"),
         ))
         seen.add(r["group"])
-    ideal_view._layout(fig, "Every landform by its departure from the ideal (dots: transects; bar: average ± sd)",
+    what = "the fixed triangle" if against == ideal.TRIANGLE else "the ideal"
+    ideal_view._layout(fig, f"Every landform by its departure from {what} (dots: transects; bar: average ± sd)",
                        160 + 24 * max(len(t), 3))
     fig.update_layout(margin=dict(l=20, r=20, t=70, b=40),
                       legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0))
@@ -109,6 +116,7 @@ def _fit_traces(r: dict, legend: bool):
     """The real profile, its ideal, and the extra and missing rock between them, in km and m."""
     x = np.asarray(r["x"]) / 1000.0
     zr, zi = np.asarray(r["real"]), np.asarray(r["ideal"])
+    name = ideal_view.ideal_label(r.get("against", ideal_view.BEST))
     return [
         go.Scatter(x=np.asarray(r["profile_x"]) / 1000.0, y=r["profile_z"], mode="lines",
                    line=dict(width=1, color=ideal_view.FAINT), name="data beyond the feet",
@@ -124,8 +132,8 @@ def _fit_traces(r: dict, legend: bool):
                    line=dict(width=0), name="missing rock (below the ideal)", hoverinfo="skip",
                    showlegend=legend, legendgroup="missing"),
         go.Scatter(x=x, y=zi, mode="lines", line=dict(width=1.5, color=ideal_view.INK_2, dash="dash"),
-                   name="ideal", showlegend=legend, legendgroup="ideal",
-                   hovertemplate="ideal %{y:.0f} m<extra></extra>"),
+                   name=name, showlegend=legend, legendgroup="ideal",
+                   hovertemplate=name + " %{y:.0f} m<extra></extra>"),
         go.Scatter(x=x, y=zr, mode="lines", line=dict(width=2, color=ideal_view.INK), name="profile",
                    showlegend=legend, legendgroup="profile",
                    hovertemplate="%{x:.2f} km, %{y:.0f} m<extra></extra>"),
@@ -167,29 +175,39 @@ def single_figure(r: dict, title: str):
     return fig
 
 
-def _summary_table(t: pd.DataFrame):
-    show = t.sort_values("Average departure")[["Landform", "Group", "Transects", "Average departure",
-                                                "Spread (sd)", "Lowest", "Highest", "Grade"]].copy()
+def _summary_table(t: pd.DataFrame, against: str = ideal_view.BEST):
+    cols = ["Landform", "Group", "Transects", "Average departure", "Spread (sd)", "Lowest", "Highest"]
+    show = t.sort_values("Average departure")[cols + ([] if against == ideal.TRIANGLE else ["Grade"])].copy()
     for c in ("Average departure", "Lowest", "Highest"):
         show[c] = show[c].map(_pct)
     show["Spread (sd)"] = show["Spread (sd)"].map(lambda v: f"± {v * 100:.1f}%")
     st.dataframe(show, width="stretch", hide_index=True)
 
 
-def render_library(library: dict, library_dir: Path):
-    fits = load_fits(str(library_dir / "fits.json"))
+def render_library(library: dict, library_dir: Path, against: str = ideal_view.BEST):
+    fits = read_against(load_fits(str(library_dir / "fits.json")), against)
     if not library or not fits:
         st.warning("The transect library could not be read.")
         return
-    table = summary(library, fits)
+    tri = against == ideal.TRIANGLE
+    table = summary(library, fits, against)
     names = {f["id"]: f["name"] for f in library.values()}
 
-    st.markdown(
-        f"**{len(table)} real landforms, {sum(len(d) for d in table['departures'])} transects**, each "
-        "fitted by the one procedure: the ideal curve that leaves the least rock out of place, and "
-        "that rock as a share of the landform's box (its departure). Land is Copernicus DEM GLO-30, "
-        "the sea floor ETOPO1; pick a landform to see its sources and transect positions."
-    )
+    n = f"**{len(table)} real landforms, {sum(len(d) for d in table['departures'])} transects**, each "
+    if tri:
+        st.markdown(
+            n + "compared with the fixed triangle, which has nothing fitted: its base runs between the "
+            "two feet, its apex stands at the full height midway between them, and its sides are "
+            "straight. The rock out of place, as a share of the landform's box, is its departure. "
+            "Land is Copernicus DEM GLO-30, the sea floor ETOPO1; pick a landform to see its sources "
+            "and transect positions."
+        )
+    else:
+        st.markdown(
+            n + "fitted by the one procedure: the ideal curve that leaves the least rock out of place, "
+            "and that rock as a share of the landform's box (its departure). Land is Copernicus DEM "
+            "GLO-30, the sea floor ETOPO1; pick a landform to see its sources and transect positions."
+        )
     c1, c2, c3 = st.columns([1.2, 1.6, 1.2], gap="medium")
     with c1:
         group = st.radio("Show", [ALL] + list(GROUPS.values()), horizontal=False, key="lib_group")
@@ -216,11 +234,13 @@ def render_library(library: dict, library_dir: Path):
             col.metric(name, f"{vals.mean() * 100:.1f}%",
                        help=f"Mean of the {len(vals)} landforms' average departures; range "
                             f"{_pct(vals.min())} to {_pct(vals.max())}.")
-        st.plotly_chart(overview_figure(in_group), width="stretch")
-        st.caption("The shaded bands are the provisional grades. Hover a dot for its transect.")
+        st.plotly_chart(overview_figure(in_group, against), width="stretch")
+        st.caption(("The dotted line is where " + ideal_view.TRIANGLE_LINE + " centred between its "
+                    "feet sits: the other end member. " if tri else
+                    "The shaded bands are the provisional grades. ") + "Hover a dot for its transect.")
         with st.expander("The numbers, landform by landform", expanded=False):
-            _summary_table(in_group)
-        st.markdown(f"#### Every transect ({len(rows)}), with its ideal")
+            _summary_table(in_group, against)
+        st.markdown(f"#### Every transect ({len(rows)}), with " + ("the fixed triangle" if tri else "its ideal"))
         st.caption("Blue is extra rock above the ideal, red is missing rock below it, the grey line is "
                    "the ground beyond the feet, and on a ridge the dotted line is the spreading axis. "
                    "Distance in km, elevation in m.")
@@ -238,6 +258,13 @@ def render_library(library: dict, library_dir: Path):
         return
     r = next(r for r in rows if r["column"] == transect)
     st.plotly_chart(single_figure(r, f"{entry['name']}, {transect}: {_pct(r['departure'])}"), width="stretch")
-    st.caption(f"{r['name'][0].upper() + r['name'][1:]}. Ideal: {r['ideal_words']}. Extra rock "
-               f"{_pct(r['extra'])}, missing rock {_pct(r['missing'])}; grade {r['grade']}."
-               + (f" Spreading axis: {r['axis_type']}, read as {r['rate_words']}." if r.get("axis_type") else ""))
+    if tri:
+        words = ("Against the fixed triangle, nothing fitted. The real "
+                 + ("valley floor" if one["group"] == "valley" else "summit" if one["group"] == "volcano"
+                    else "axis")
+                 + f" is {ideal_view.offset_words(r['tri_offset'])}. Extra rock {_pct(r['extra'])}, "
+                 f"missing rock {_pct(r['missing'])}.")
+    else:
+        words = (f"{r['name'][0].upper() + r['name'][1:]}. Ideal: {r['ideal_words']}. Extra rock "
+                 f"{_pct(r['extra'])}, missing rock {_pct(r['missing'])}; grade {r['grade']}.")
+    st.caption(words + (f" Spreading axis: {r['axis_type']}, read as {r['rate_words']}." if r.get("axis_type") else ""))

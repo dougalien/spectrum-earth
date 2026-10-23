@@ -285,6 +285,11 @@ def test_every_library_transect_measures(fid, feature, col):
     # The library view draws from fits.json, so it must still be what the engine gives.
     stored = FITS[(fid, col)]
     assert stored["ok"] and stored["departure"] == pytest.approx(item["departure"], abs=1e-9)
+    # The fixed triangle on the same frame: never closer than the best fit, and stored alike.
+    tri = I.as_triangle(item)
+    assert item["departure"] <= tri["departure"] + 1e-9
+    assert stored["tri_departure"] == pytest.approx(tri["departure"], abs=1e-9)
+    assert I.summary_row(tri, fid)["Ideal"] == "fixed triangle"
 
 
 def test_the_library_has_ten_of_each_and_every_transect_is_placed():
@@ -370,3 +375,64 @@ def test_real_transects_of_one_volcano_are_averaged():
     avg = I.average([I.measure(df.iloc[:, 0], df[c], I.HILL) for c in df.columns[1:]])
     assert avg["n"] == 4 and avg["failed"] == 0
     assert avg["lo"] < avg["mean"] < avg["hi"] < 0.025
+
+
+# ---------------------------------------------------------------------
+# The fixed triangle: one rigid ideal, nothing fitted
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("kind", [I.HILL, I.VALLEY])
+def test_a_perfect_triangle_is_the_fixed_triangle(kind):
+    item = I.as_triangle(I.measure(*two_sided(lambda u: 1.0 - u, kind=kind), kind))
+    assert item["departure"] < 0.005
+    assert item["against"] == I.TRIANGLE and item["grade"] == ""
+
+
+@pytest.mark.parametrize("kind", [I.HILL, I.VALLEY])
+@pytest.mark.parametrize("k", [1.0, -1.0])
+def test_a_centred_parabola_is_one_sixth_from_the_triangle(k, kind):
+    """The other end member: a perfect parabola, bowed in or domed, leaves 1/6 of its box out of place."""
+    item = I.measure(*two_sided(lambda u: I.parabola_curve(u, k), kind=kind), kind)
+    tri = I.as_triangle(item)
+    assert tri["departure"] == pytest.approx(I.TRIANGLE_PARABOLA, abs=0.005)
+    # A cone with bowed-in flanks is missing rock against the triangle, a dome extra rock; a
+    # U-shaped valley (the dome, upside down) is missing rock against the V.
+    assert (tri["deficit"] > tri["excess"]) == ((k > 0) == (kind == I.HILL))
+    # The best fit still finds the parabola.
+    assert item["departure"] < 0.01
+
+
+def test_a_summit_off_the_middle_is_rock_out_of_place():
+    """Straight sides meeting off the middle fit perfectly, but are not the isosceles triangle."""
+    item = I.measure(*two_sided(lambda u: 1.0 - u, left_share=0.3), I.HILL)
+    tri = I.as_triangle(item)
+    assert item["departure"] < 0.005
+    assert item["triangle"]["offset"] == pytest.approx(-0.2, abs=0.01)
+    assert tri["departure"] > 0.05
+    # The triangle's apex is midway between the feet, at the full height.
+    m = item["m"]
+    x, _, zt = I.drawn_halves(tri)
+    assert x[np.argmax(zt)] == pytest.approx(0.5 * (m["x_left"] + m["x_right"]), abs=0.01 * m["width"])
+    assert zt.max() == pytest.approx(m["apex_elev"], abs=0.01 * m["height"])
+
+
+def test_the_triangle_depends_only_on_the_frame():
+    """Two different profiles on the same feet and top get the same triangle."""
+    a = I.measure(*two_sided(lambda u: I.parabola_curve(u, 0.6)), I.HILL)
+    b = I.measure(*two_sided(lambda u: I.superellipse_curve(u, 1.8)), I.HILL)
+    for s in ("L", "R"):
+        assert np.allclose(a["triangle"]["ideal"][s], b["triangle"]["ideal"][s], atol=0.01)
+
+
+def test_the_triangle_departure_does_not_depend_on_size():
+    x, z = transect("taranaki")
+    base = I.measure(x, z, I.HILL)["triangle"]["departure"]
+    for sx, sz in ((10.0, 1.0), (1.0, 0.1), (0.003, 7.0)):
+        assert I.measure(x * sx, z * sz + 500.0, I.HILL)["triangle"]["departure"] == pytest.approx(base, abs=1e-6)
+
+
+def test_a_long_profile_is_compared_with_one_straight_side():
+    x = np.linspace(0.0, 20000.0, 2001)
+    straight = I.as_triangle(I.measure(x, 1500.0 * (1.0 - x / 20000.0), I.SLOPE))
+    graded = I.as_triangle(I.measure(x, 1500.0 * I.parabola_curve(x / 20000.0, 1.0), I.SLOPE))
+    assert straight["departure"] < 0.005
+    assert graded["departure"] == pytest.approx(I.TRIANGLE_PARABOLA, abs=0.005)

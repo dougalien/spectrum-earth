@@ -4,9 +4,11 @@ The Ideal Shape and Shape Chart views of Spectrum Earth.
 Everything measured here comes from ideal_shape.py; this module only draws it
 and lays it out. Every landform gets the same two things: the plot of the fit
 (the real profile, its ideal, and the extra and missing rock between them) and
-its departure number. Extra and missing rock are a polarity, so they take the
-diverging pair (blue / red); feature types on the shape chart take the first
-three categorical slots.
+its departure number. The ideal is either the best-fitting curve or the fixed
+triangle (nothing fitted); the choice is made once, at the top of the app, and
+every plot and number follows it. Extra and missing rock are a polarity, so
+they take the diverging pair (blue / red); feature types on the shape chart
+take the first three categorical slots.
 """
 
 from __future__ import annotations
@@ -54,6 +56,18 @@ DATASETS = {
 RATE_SOURCE = ("Full spreading rates are approximate, from the MORVEL plate motion model "
                "(DeMets, Gordon and Argus, 2010, Geophysical Journal International 181, 1-80).")
 
+# What every landform is compared with. The best fit is the curve that leaves
+# the least rock out of place; the fixed triangle has nothing fitted.
+BEST = "best"
+TRIANGLE_AGAINST = ideal.TRIANGLE
+AGAINST = {"Best-fit curve": BEST, "Fixed triangle": TRIANGLE_AGAINST}
+AGAINST_HELP = (
+    "Best-fit curve: the ideal curve that leaves the least rock out of place. Fixed triangle: one "
+    "rigid ideal with nothing fitted, its base between the two feet and its apex at the full height "
+    "midway between them, with straight sides. Every plot and number follows this choice."
+)
+TRIANGLE_LINE = "a perfect parabola"
+
 DISTANCE_UNITS = {"metres": 1.0, "kilometres": 1000.0, "feet": 0.3048, "miles": 1609.344}
 ELEVATION_UNITS = {"metres": 1.0, "feet": 0.3048, "kilometres": 1000.0}
 
@@ -65,6 +79,42 @@ def fit_profile(x: np.ndarray, z: np.ndarray, feature: str) -> tuple[dict, dict 
         ridge = ideal.read_ridge(x, z)
         return ridge["whole"], ridge
     return ideal.measure(x, z, FEATURE_CHOICES[feature]), None
+
+
+def read_against(item: dict, against: str) -> dict:
+    """The measurement read against the chosen ideal: the best fit as measured, or the fixed triangle."""
+    return ideal.as_triangle(item) if against == ideal.TRIANGLE else item
+
+
+AGAINST_NAMES = {BEST: "best-fit curve", ideal.TRIANGLE: "fixed triangle"}
+
+
+def average_grade(d: float, against: str) -> str:
+    """The provisional grade of a best-fit departure; none against the fixed triangle."""
+    return "" if against == ideal.TRIANGLE else ideal.departure_class(d)
+
+
+def triangle_words(item: dict) -> str:
+    """The fixed triangle in words, with where the real top sits against it."""
+    if item["kind"] == ideal.SLOPE:
+        return "Ideal: the fixed triangle's side, a straight line from the head to the mouth"
+    where = offset_words(item["triangle"]["offset"])
+    if item["kind"] == ideal.VALLEY:
+        return ("Ideal: the fixed triangle upside down (a V), straight walls from each rim down to a point "
+                f"at the full depth midway between the rims; the real valley floor is {where}")
+    return ("Ideal: the fixed triangle, straight flanks from each foot up to an apex at the full height "
+            f"midway between the feet; the real summit is {where}")
+
+
+def ideal_label(against: str) -> str:
+    return "fixed triangle" if against == ideal.TRIANGLE else "ideal"
+
+
+def offset_words(offset: float) -> str:
+    """Where the summit sits against the middle of the feet, e.g. '12% of the width left of the middle'."""
+    if abs(offset) < 0.005:
+        return "on the middle"
+    return f"{abs(offset):.0%} of the width {'left' if offset < 0 else 'right'} of the middle"
 
 
 def load_library(folder: Path) -> dict:
@@ -147,9 +197,10 @@ def overlay_figure(item: dict, x_label: str, y_label: str, title: str = "", heig
     fig.add_trace(go.Scatter(x=x, y=zi, mode="lines", fill="tonexty", fillcolor=DEFICIT_FILL,
                              line=dict(width=0), name="missing rock (below the ideal)", hoverinfo="skip",
                              showlegend=legend))
+    name = ideal_label(item.get("against", BEST))
     fig.add_trace(go.Scatter(
-        x=x, y=zi, mode="lines", name="ideal", line=dict(width=2, color=INK_2, dash="dash"),
-        hovertemplate="ideal %{y:.4g}<extra></extra>", showlegend=legend,
+        x=x, y=zi, mode="lines", name=name, line=dict(width=2, color=INK_2, dash="dash"),
+        hovertemplate=name + " %{y:.4g}<extra></extra>", showlegend=legend,
     ))
     fig.add_trace(go.Scatter(
         x=x, y=zr, mode="lines", name="profile", line=dict(width=3, color=INK),
@@ -241,7 +292,16 @@ width or more. The name never changes the fit or the number.
 
 **The grades** (near-ideal under 1%, slightly modified under 2.5%, modified under 5%, strongly
 modified above) are provisional: they were set from a few profiles before the real library was added,
-not from a calibrated population.
+not from a calibrated population. They apply to the best fit only.
+
+**The fixed triangle.** With enough freedom a fitted curve might in the end match any profile, so
+every landform can also be compared with one rigid ideal that has nothing fitted. Its base runs
+between the two feet found in step 1, its apex stands at the landform's full height midway between
+the feet, and its sides are straight: an isosceles triangle in real distance (upside down for a
+valley, and one straight side from head to mouth for a long profile). The rock out of place is
+measured as in step 3, as a share of the same box. Bent sides and a summit off the middle both
+count. Landforms lie between two end members, the triangle and the parabola: a perfect parabola
+centred between its feet, bowed in or domed, scores 16.7% against the triangle.
             """
         )
 
@@ -261,7 +321,8 @@ def _transects_from_table(df: pd.DataFrame, name: str) -> list:
 
 
 def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: str, read_file,
-                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None):
+                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None,
+                     against: str = BEST):
     """Step 4: several transects of one landform, each fitted the same way, then averaged.
 
     A landform from the library brings all its transects with it; otherwise they are uploaded.
@@ -270,7 +331,7 @@ def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: 
     if library_entry is not None and library_table is not None:
         transects = _transects_from_table(library_table, library_entry["name"])
         st.caption(library_citation(library_entry))
-        _render_transect_average(transects, feature, sx, sz, x_label, y_label, library_entry["name"])
+        _render_transect_average(transects, feature, sx, sz, x_label, y_label, library_entry["name"], against)
         return
     files = st.file_uploader(
         "Transect files", type=["csv", "txt", "xlsx"], accept_multiple_files=True,
@@ -288,17 +349,17 @@ def render_transects(feature: str, sx: float, sz: float, x_label: str, y_label: 
             transects += _transects_from_table(read_file(f), f.name.rsplit(".", 1)[0])
         except Exception as e:
             st.warning(f"{f.name} could not be read: {e}")
-    _render_transect_average(transects, feature, sx, sz, x_label, y_label, "")
+    _render_transect_average(transects, feature, sx, sz, x_label, y_label, "", against)
 
 
 def _render_transect_average(transects: list, feature: str, sx: float, sz: float, x_label: str,
-                             y_label: str, name: str):
+                             y_label: str, name: str, against: str = BEST):
     if not transects:
         return
     items = []
     for label, x, z in transects:
         it, _ = fit_profile(x * sx, z * sz, feature)
-        items.append((label, to_display_units(it, sx, sz)))
+        items.append((label, read_against(to_display_units(it, sx, sz), against)))
     avg = ideal.average([it for _, it in items])
     if avg["n"] == 0:
         st.warning("None of the transects could be fitted.")
@@ -310,8 +371,9 @@ def _render_transect_average(transects: list, feature: str, sx: float, sz: float
     c2.metric("Spread", f"± {avg['sd'] * 100:.1f}%",
               help="Standard deviation of the transects' departures.")
     c3.metric("Transects", f"{avg['n']}", help=f"Range {_pct(avg['lo'])} to {_pct(avg['hi'])}.")
-    st.caption(f"Grade of the average: **{ideal.departure_class(avg['mean'])}**. Range "
-               f"{_pct(avg['lo'])} to {_pct(avg['hi'])}"
+    grade = average_grade(avg["mean"], against)
+    st.caption((f"Grade of the average: **{grade}**. " if grade else "Against the fixed triangle. ")
+               + f"Range {_pct(avg['lo'])} to {_pct(avg['hi'])}"
                + (f"; {avg['failed']} transect(s) could not be fitted." if avg["failed"] else "."))
     cols = st.columns(2)
     for i, (label, it) in enumerate(items):
@@ -331,14 +393,15 @@ def _render_transect_average(transects: list, feature: str, sx: float, sz: float
             kind = FEATURE_CHOICES[feature]
             _add_rows([{"Label": label, "Group": "", "Feature": ideal.VOCAB[kind]["feature"],
                         "Shape": f"average of {avg['n']} transects", "Departure": avg["mean"],
-                        "Grade": ideal.departure_class(avg["mean"]), "Spread (sd)": avg["sd"],
-                        "Transects": avg["n"]}])
+                        "Grade": grade, "Spread (sd)": avg["sd"], "Transects": avg["n"],
+                        "Ideal": AGAINST_NAMES[against]}], against)
             st.success("Added. See the Shape Chart tab.")
 
 
 def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, ridge: dict | None = None,
                      feature: str = "", units: tuple = (1.0, 1.0), read_file=None,
-                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None):
+                     library_entry: dict | None = None, library_table: pd.DataFrame | None = None,
+                     against: str = BEST):
     if ridge is not None:
         st.caption(
             f"Spreading axis: **{ridge['axis_type']}**, read as **{ridge['rate_words']}** "
@@ -350,44 +413,53 @@ def render_ideal_tab(item: dict, x_label: str, y_label: str, source_name: str, r
     else:
         words = ideal.VOCAB[item["kind"]]
         st.markdown(f"### {item['name'][0].upper() + item['name'][1:]}")
+        tri = item.get("against") == ideal.TRIANGLE
         c1, c2, c3 = st.columns([1.0, 1.2, 2.2])
         c1.metric("Departure", _pct(item["departure"]),
-                  help="Rock out of place against the best-fitting ideal - extra plus missing - as a "
-                       "share of the landform's box (width times height). 0 means the profile IS its "
-                       "ideal; the further it departs, the bigger the number.")
-        c2.metric("Grade", item["grade"], help="Provisional: under 1% near-ideal, under 2.5% "
-                                               "slightly modified, under 5% modified.")
+                  help=("Rock out of place against the fixed triangle" if tri else
+                        "Rock out of place against the best-fitting ideal")
+                       + " - extra plus missing - as a share of the landform's box (width times "
+                       "height). 0 means the profile IS its ideal; the further it departs, the bigger "
+                       "the number.")
+        if tri and item["kind"] != ideal.SLOPE:
+            c2.metric(f"{words['apex'].capitalize()} off the middle", f"{abs(item['triangle']['offset']):.0%}",
+                      help=f"How far the {words['apex']} sits from the middle of the two feet, as a share "
+                           "of the width. The triangle's apex is always on the middle.")
+        elif not tri:
+            c2.metric("Grade", item["grade"], help="Provisional: under 1% near-ideal, under 2.5% "
+                                                   "slightly modified, under 5% modified.")
         c3.metric("Extra rock / missing rock", f"{_pct(item['excess'])} / {_pct(item['deficit'])}",
                   help="The two parts of the departure: rock above the ideal (blue) and rock missing "
                        "below it (red), each as a share of the box.")
         st.plotly_chart(overlay_figure(item, x_label, y_label, axis=ridge["axis"] if ridge else None),
                         width="stretch")
-        st.caption(
-            f"Ideal: {ideal.fit_words(item)}, its top at {item['fit']['top']:.0%} of the height of the "
-            f"{words['feature']}"
-            + (f", level across {item['level']:.0%} of the width" if item["flat"] else "") + "."
-        )
+        if tri:
+            st.caption(triangle_words(item) + ". Nothing is fitted. For scale, " + TRIANGLE_LINE
+                       + " centred between its feet scores 16.7%.")
+        else:
+            st.caption(
+                f"Ideal: {ideal.fit_words(item)}, its top at {item['fit']['top']:.0%} of the height of the "
+                f"{words['feature']}"
+                + (f", level across {item['level']:.0%} of the width" if item["flat"] else "") + "."
+            )
         for n in item.get("notes", []):
             st.info(n)
     if read_file is not None and feature:
         render_transects(feature, units[0], units[1], x_label, y_label, read_file,
-                         library_entry, library_table)
+                         library_entry, library_table, against)
     render_explainer()
 
 
 # =====================================================================
 # The Shape Chart tab: landforms ranked by their departure
 # =====================================================================
-def ranking_figure(rows: list, current: dict | None):
-    """Every profile added, ranked by departure from its ideal, lowest at the top."""
-    pts = [dict(r) for r in rows if np.isfinite(r.get("Departure", np.nan))]
-    if current and np.isfinite(current.get("Departure", np.nan)):
-        pts.append(dict(current, Label="profile loaded now", **{"#": "now"}))
-    pts.sort(key=lambda r: r["Departure"])
-    labels = [f"{r.get('#', '')}. {r.get('Label', '')}" if r.get("#") != "now" else "profile loaded now"
-              for r in pts]
-    top = max([0.06] + [r["Departure"] * 1.12 for r in pts]) * 100.0
-    fig = go.Figure()
+def departure_bands(fig, top: float, against: str):
+    """The provisional grades behind a best-fit chart, or the parabola's mark on a triangle chart."""
+    if against == ideal.TRIANGLE:
+        fig.add_vline(x=ideal.TRIANGLE_PARABOLA * 100.0, line=dict(color=INK_2, width=1, dash="dot"),
+                      annotation_text=TRIANGLE_LINE, annotation_position="top",
+                      annotation_font=dict(size=11, color=INK_2))
+        return
     lo = 0.0
     shades = ["rgba(27,175,122,0.07)", "rgba(237,161,0,0.06)", "rgba(235,104,52,0.06)",
               "rgba(208,59,59,0.06)"]
@@ -400,6 +472,20 @@ def ranking_figure(rows: list, current: dict | None):
                       annotation_text=label, annotation_position="top left" if i % 2 == 0 else "bottom left",
                       annotation_font=dict(size=11, color=INK_2))
         lo = hi
+
+
+def ranking_figure(rows: list, current: dict | None, against: str = BEST):
+    """Every profile added, ranked by departure from its ideal, lowest at the top."""
+    pts = [dict(r) for r in rows if np.isfinite(r.get("Departure", np.nan))]
+    if current and np.isfinite(current.get("Departure", np.nan)):
+        pts.append(dict(current, Label="profile loaded now", **{"#": "now"}))
+    pts.sort(key=lambda r: r["Departure"])
+    labels = [f"{r.get('#', '')}. {r.get('Label', '')}" if r.get("#") != "now" else "profile loaded now"
+              for r in pts]
+    floor = ideal.TRIANGLE_PARABOLA * 1.15 if against == ideal.TRIANGLE else 0.06
+    top = max([floor] + [r["Departure"] * 1.12 for r in pts]) * 100.0
+    fig = go.Figure()
+    departure_bands(fig, top, against)
     seen = set()
     for lab, r in zip(labels, pts):
         feat = r.get("Feature", "hill")
@@ -417,7 +503,8 @@ def ranking_figure(rows: list, current: dict | None):
         ))
         if not now:
             seen.add(feat)
-    _layout(fig, "Landforms ranked by their departure from the ideal", 160 + 28 * max(len(pts), 3))
+    _layout(fig, "Landforms ranked by their departure from the "
+            + ("fixed triangle" if against == ideal.TRIANGLE else "ideal"), 160 + 28 * max(len(pts), 3))
     fig.update_layout(margin=dict(l=20, r=20, t=70, b=40),
                       legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0))
     fig.update_xaxes(title="departure, % of the box (0 = the landform is its ideal)", range=[0, top])
@@ -425,17 +512,22 @@ def ranking_figure(rows: list, current: dict | None):
     return fig
 
 
-def _add_rows(new_rows: list):
-    rows = list(st.session_state.get("ideal_chart_rows") or [])
+def _rows_key(against: str) -> str:
+    """Each comparison keeps its own chart, so best-fit and triangle numbers never share an axis."""
+    return "ideal_chart_rows" if against == BEST else f"ideal_chart_rows_{against}"
+
+
+def _add_rows(new_rows: list, against: str = BEST):
+    rows = list(st.session_state.get(_rows_key(against)) or [])
     for r in new_rows:
         if r:
             r = dict(r)
             r["#"] = len(rows) + 1
             rows.append(r)
-    st.session_state["ideal_chart_rows"] = rows
+    st.session_state[_rows_key(against)] = rows
 
 
-def measure_library(library: dict, sample_feature, library_dir: Path) -> list:
+def measure_library(library: dict, sample_feature, library_dir: Path, against: str = BEST) -> list:
     """One shape-chart row per library landform: the average of its transects."""
     out = []
     for label, entry in library.items():
@@ -444,29 +536,35 @@ def measure_library(library: dict, sample_feature, library_dir: Path) -> list:
         except Exception:
             continue
         feature = sample_feature(label)
-        items = [fit_profile(x, z, feature)[0] for _, x, z in _transects_from_table(table, entry["name"])]
+        items = [read_against(fit_profile(x, z, feature)[0], against)
+                 for _, x, z in _transects_from_table(table, entry["name"])]
         avg = ideal.average(items)
         if avg["n"] == 0:
             continue
         kind = FEATURE_CHOICES[feature]
         out.append({"Label": entry["name"], "Group": entry["feature"], "Feature": ideal.VOCAB[kind]["feature"],
                     "Shape": f"average of {avg['n']} transects", "Departure": avg["mean"],
-                    "Grade": ideal.departure_class(avg["mean"]), "Spread (sd)": avg["sd"],
-                    "Transects": avg["n"]})
+                    "Grade": average_grade(avg["mean"], against), "Spread (sd)": avg["sd"],
+                    "Transects": avg["n"], "Ideal": AGAINST_NAMES[against]})
     return out
 
 
 def render_shape_chart(item: dict, source_name: str, library: dict, sample_feature,
-                       library_dir: Path):
+                       library_dir: Path, against: str = BEST):
+    tri = against == ideal.TRIANGLE
     st.markdown(
-        "Landforms organised by their departure from the ideal, lowest first: a landform that IS its "
-        "ideal sits at 0, and the further it departs, the further right it sits. Every number comes "
-        "from the same procedure, so landforms of any type and size can be compared."
+        "Landforms organised by their departure from "
+        + ("the fixed triangle" if tri else "the ideal")
+        + ", lowest first: a landform that IS its ideal sits at 0, and the further it departs, the "
+        "further right it sits. Every number comes from the same procedure, so landforms of any type "
+        "and size can be compared."
     )
     current = ideal.summary_row(item, "profile loaded now") if item.get("ok") else None
-    rows = st.session_state.get("ideal_chart_rows") or []
-    st.plotly_chart(ranking_figure(rows, current), width="stretch")
-    st.caption("Colour is the feature type. The shaded bands are the provisional grades.")
+    rows = st.session_state.get(_rows_key(against)) or []
+    st.plotly_chart(ranking_figure(rows, current, against), width="stretch")
+    st.caption("Colour is the feature type. "
+               + ("The dotted line is where " + TRIANGLE_LINE + " centred between its feet sits." if tri
+                  else "The shaded bands are the provisional grades."))
 
     a1, a2, a3, a4, a5 = st.columns([1.4, 1.1, 0.9, 1.0, 0.7], gap="medium")
     default_label = str(source_name or "").rsplit(".", 1)[0] or f"profile {len(rows) + 1}"
@@ -477,25 +575,25 @@ def render_shape_chart(item: dict, source_name: str, library: dict, sample_featu
                               help="A note kept with the profile in the table, e.g. glacial, fluvial, Mars.")
     with a3:
         if st.button("Add this profile", width="stretch", disabled=current is None):
-            _add_rows([ideal.summary_row(item, label or default_label, group)])
+            _add_rows([ideal.summary_row(item, label or default_label, group)], against)
             st.rerun()
     with a4:
         if st.button("Add the library", width="stretch",
                      help="Fit every transect of every real landform in the library and add each "
                           "landform's average to the chart."):
             have = {(r.get("Label"), r.get("Group")) for r in rows}
-            new = [r for r in measure_library(library, sample_feature, library_dir)
+            new = [r for r in measure_library(library, sample_feature, library_dir, against)
                    if (r["Label"], r["Group"]) not in have]
-            _add_rows(new)
+            _add_rows(new, against)
             st.rerun()
     with a5:
         if st.button("Clear", width="stretch", disabled=not rows):
-            st.session_state["ideal_chart_rows"] = []
+            st.session_state[_rows_key(against)] = []
             st.rerun()
 
     if rows:
         df = pd.DataFrame(rows).sort_values("Departure")
-        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Departure", "Spread (sd)", "Grade"]
+        show_cols = ["#", "Label", "Group", "Feature", "Shape", "Departure", "Spread (sd)"] + ([] if tri else ["Grade"])
         show = df[[c for c in show_cols if c in df.columns]].copy()
         show["Departure"] = show["Departure"].map(lambda v: _pct(v))
         if "Spread (sd)" in show:
@@ -504,7 +602,7 @@ def render_shape_chart(item: dict, source_name: str, library: dict, sample_featu
         st.download_button(
             "Shape chart CSV (all columns)",
             data=df.to_csv(index=False).encode("utf-8"),
-            file_name="spectrumearth_shape_chart.csv",
+            file_name="spectrumearth_shape_chart_triangle.csv" if tri else "spectrumearth_shape_chart.csv",
             mime="text/csv",
         )
     else:

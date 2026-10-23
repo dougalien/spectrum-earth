@@ -1,8 +1,9 @@
 """Fit every transect in samples/library/ and write the results to samples/library/fits.json.
 
 The app's library view draws from this file, so it opens at once instead of
-fitting 99 transects (about a second each) on every start. Every number in it
-comes from ideal_shape.py by the one fixed procedure; tests/ re-fits every
+fitting 100 transects (about a second each) on every start. Each transect
+carries both comparisons, its best fit and the fixed triangle. Every number in
+it comes from ideal_shape.py by the one fixed procedure; tests/ re-fits every
 transect and checks the file still matches, so it cannot drift from the engine.
 
     py tools/fit_library.py
@@ -30,11 +31,13 @@ def fit(x, z, feature: str) -> tuple[dict, dict | None]:
 
 
 def drawn(item: dict) -> dict:
-    """The real profile and its ideal across both halves, left to right, thinned for drawing."""
+    """The real profile, its ideal and the fixed triangle across both halves, left to right,
+    thinned for drawing."""
     x, zr, zi = ideal.drawn_halves(item)
+    zt = ideal.drawn_halves(ideal.as_triangle(item))[2]
     keep = np.unique(np.linspace(0, len(x) - 1, N_DRAW).round().astype(int))
     return {"x": x[keep].round(1).tolist(), "real": zr[keep].round(1).tolist(),
-            "ideal": zi[keep].round(1).tolist()}
+            "ideal": zi[keep].round(1).tolist(), "triangle": zt[keep].round(1).tolist()}
 
 
 def main():
@@ -53,6 +56,8 @@ def main():
                 row.update({
                     "departure": item["departure"], "extra": item["excess"], "missing": item["deficit"],
                     "grade": item["grade"], "name": item["name"], "ideal_words": ideal.fit_words(item),
+                    "tri_departure": item["triangle"]["departure"], "tri_extra": item["triangle"]["excess"],
+                    "tri_missing": item["triangle"]["deficit"], "tri_offset": item["triangle"]["offset"],
                     "profile_x": x[sel].round(1).tolist(), "profile_z": z[sel].round(1).tolist(),
                     **drawn(item),
                 })
@@ -60,7 +65,8 @@ def main():
                 row.update({"axis": ridge["axis"], "axis_type": ridge["axis_type"],
                             "rate_words": ridge["rate_words"]})
             out.append(row)
-            print(f.id, col, f"{row.get('departure', float('nan')) * 100:.2f}%")
+            print(f.id, col, f"{row.get('departure', float('nan')) * 100:.2f}%",
+                  f"triangle {row.get('tri_departure', float('nan')) * 100:.2f}%")
     (LIB / "fits.json").write_text(json.dumps(out, separators=(",", ":")))
 
 

@@ -2836,12 +2836,18 @@ st.markdown(
 # -----------------------------
 # The library of real transects (the default view), or one profile
 # -----------------------------
-_view = st.radio("View", ["Explore the library", "Fit a profile"], horizontal=True, key="app_view",
-                 label_visibility="collapsed",
-                 help="The library shows every real transect already fitted. Fit a profile loads one "
-                      "file, or one library landform, with all the controls.")
+_view_col, _against_col = st.columns([1.0, 1.4], gap="medium")
+with _view_col:
+    _view = st.radio("View", ["Explore the library", "Fit a profile"], horizontal=True, key="app_view",
+                     label_visibility="collapsed",
+                     help="The library shows every real transect already fitted. Fit a profile loads one "
+                          "file, or one library landform, with all the controls.")
+with _against_col:
+    _against = st.radio("Ideal shape", list(ideal_view.AGAINST), horizontal=True, key="ideal_against",
+                        help=ideal_view.AGAINST_HELP)
+against = ideal_view.AGAINST[_against]
 if _view == "Explore the library":
-    library_view.render_library(LIBRARY, Path(__file__).resolve().parent / "samples" / "library")
+    library_view.render_library(LIBRARY, Path(__file__).resolve().parent / "samples" / "library", against)
     st.stop()
 
 # -----------------------------
@@ -2892,6 +2898,10 @@ with control_ideal:
         st.checkbox("Crop X Range", key="crop_enabled",
                     help="Trim the profile to one feature before fitting.")
     st.caption(
+        "One procedure for every landform: the fixed triangle, with nothing fitted, is set on the "
+        "two feet with its apex at the full height midway between them, and the rock out of place, "
+        "as a share of the landform's box, is its departure. 0 means the landform is the triangle."
+        if against == ideal_view.TRIANGLE_AGAINST else
         "One procedure for every landform: the ideal curve that leaves the least rock out of "
         "place is fitted, and that rock, as a share of the landform's box, is its departure. "
         "0 means the landform is its ideal."
@@ -3148,6 +3158,7 @@ if ideal_item.get("ok"):
     ideal_item = ideal_view.to_display_units(ideal_item, _sx, _sz)
 if ridge_reading is not None:
     ridge_reading = ideal_view.ridge_to_display_units(ridge_reading, _sx, _sz)
+ideal_item = ideal_view.read_against(ideal_item, against)
 
 st.session_state.status_notes = []
 if st.session_state.normalize:
@@ -3315,12 +3326,13 @@ with main_tabs[0]:
         feature=ideal_feature, units=(_sx, _sz), read_file=read_uploaded_file,
         library_entry=LIBRARY.get(sample_choice) if uploaded_file is None else None,
         library_table=raw_df if uploaded_file is None and sample_choice in LIBRARY else None,
+        against=against,
     )
 
 with main_tabs[1]:
     ideal_view.render_shape_chart(
         ideal_item, st.session_state.get("source_name", ""), LIBRARY,
-        sample_feature, Path(__file__).resolve().parent / "samples" / "library",
+        sample_feature, Path(__file__).resolve().parent / "samples" / "library", against,
     )
 
 with main_tabs[2]:

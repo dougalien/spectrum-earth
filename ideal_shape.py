@@ -686,6 +686,52 @@ def compare(halves: list, ideal: dict, kind: str) -> dict:
     }
 
 
+# =====================================================================
+# The fixed triangle
+#
+# The best fit can bend its sides, hold them level and lower its top, so with
+# enough freedom it might in the end match any profile. The fixed triangle is
+# the answer to that: one rigid ideal with nothing fitted. Its base is the line
+# between the two feet at the base level, its apex stands at the landform's
+# full height midway between the feet, and its sides are straight, so it is
+# isosceles in real distance. A summit off the middle counts as rock out of
+# place, just as a bent side does. A long profile has one foot, so its ideal is
+# one side of the triangle: a straight line from the head to the mouth. The
+# rock out of place is measured exactly as for the best fit (compare), as a
+# share of the same box.
+#
+# Landforms lie between two end members, the triangle and the parabola: a
+# perfect parabola centred between its feet, bowed in or domed, leaves 1/6 of
+# its box out of place against the triangle.
+# =====================================================================
+TRIANGLE = "triangle"
+TRIANGLE_PARABOLA = 1.0 / 6.0
+TRIANGLE_NAMES = {HILL: "the fixed triangle", VALLEY: "the fixed triangle (a V)", SLOPE: "a straight slope"}
+
+
+def triangle_ideal(m: dict, halves: list) -> dict:
+    """The fixed triangle on each half's own grid: 1 midway between the feet, 0 at each foot."""
+    if len(halves) == 1:
+        return {halves[0]["side"]: 1.0 - U}
+    mid = 0.5 * (m["x_left"] + m["x_right"])
+    half = 0.5 * (m["x_right"] - m["x_left"])
+    return {h["side"]: 1.0 - np.abs(m["x_apex"] + h["sign"] * U * h["radius"] - mid) / half
+            for h in halves}
+
+
+def as_triangle(item: dict) -> dict:
+    """The same profile read against the fixed triangle instead of its best fit.
+
+    The frame and the halves are unchanged; the ideal and the numbers are the
+    triangle's. There is no grade: the provisional grades were set on the best fit.
+    """
+    if not item.get("ok"):
+        return item
+    t = item["triangle"]
+    return {**item, **{k: t[k] for k in ("ideal", "excess", "deficit", "departure", "net", "residual")},
+            "against": TRIANGLE, "name": TRIANGLE_NAMES[item["kind"]], "grade": ""}
+
+
 def departure_class(d: float) -> str:
     if not np.isfinite(d):
         return "-"
@@ -778,6 +824,12 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None) -> dict:
     # Step 3: the number.
     comp = compare(halves, ideal, kind)
 
+    # The fixed triangle on the same frame, measured the same way.
+    tri = triangle_ideal(m, halves)
+    offset = (m["x_apex"] - 0.5 * (m["x_left"] + m["x_right"])) / (m["x_right"] - m["x_left"]) \
+        if kind != SLOPE else 0.0
+    triangle = {"ideal": tri, "offset": float(offset), **compare(halves, tri, kind)}
+
     # Words for the ideal: the landmark nearest its curves (below any level
     # stretch), and the level stretch when it is a real part of the shape.
     r = {h["side"]: h["radius"] for h in halves}
@@ -788,7 +840,7 @@ def measure(x, z, kind: str = HILL, ridge_axis: float | None = None) -> dict:
     flat = kind != SLOPE and level >= LEVEL_NAMED
     name = PERFECT_SHAPES[landmark]["names"][kind] + (f" with a {VOCAB[kind]['flat']}" if flat else "")
     item.update(
-        ok=True, x=x, z=z, m=m, halves=halves, fit=fit, ideal=ideal, **comp,
+        ok=True, x=x, z=z, m=m, halves=halves, fit=fit, ideal=ideal, **comp, triangle=triangle,
         landmark=landmark, flat=flat, level=level, name=name,
         grade=departure_class(comp["departure"]),
     )
@@ -849,11 +901,15 @@ def summary_row(item: dict, label: str = "", group: str = "") -> dict:
         "Grade": item["grade"],
         "Extra rock": item["excess"],
         "Missing rock": item["deficit"],
-        "Ideal top (share of height)": item["fit"]["top"],
+        "Ideal": "fixed triangle" if item.get("against") == TRIANGLE else "best-fit curve",
     }
-    for s, (f, c, v) in item["fit"]["sides"].items():
-        row[f"Ideal curve ({side_name[s]})"] = half_words(f, v)
-        row[f"Level stretch ({side_name[s]})"] = c
+    if item.get("against") == TRIANGLE:
+        row["Summit off the middle (share of width)"] = item["triangle"]["offset"]
+    else:
+        row["Ideal top (share of height)"] = item["fit"]["top"]
+        for s, (f, c, v) in item["fit"]["sides"].items():
+            row[f"Ideal curve ({side_name[s]})"] = half_words(f, v)
+            row[f"Level stretch ({side_name[s]})"] = c
     row.update({
         "Width / height": item["m"]["width_height"],
         "Asymmetry": item["m"]["asymmetry"],
